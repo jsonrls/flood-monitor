@@ -697,6 +697,8 @@ export default function FloodMap() {
   const lastMapFitRef = useRef("");
   const areaPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const areaSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const officialRainDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const officialRainDialogCloseRef = useRef<HTMLButtonElement | null>(null);
   const [status, setStatus] = useState("Preparing Albay Province data...");
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
@@ -736,6 +738,7 @@ export default function FloodMap() {
   const [hasFinishedInitialLoad, setHasFinishedInitialLoad] = useState(false);
   const [isMobileLegendOpen, setIsMobileLegendOpen] = useState(false);
   const [isReadingsPanelOpen, setIsReadingsPanelOpen] = useState(true);
+  const [isOfficialRainDialogOpen, setIsOfficialRainDialogOpen] = useState(false);
 
   const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const barangayOptions = useMemo(
@@ -968,6 +971,32 @@ export default function FloodMap() {
       document.removeEventListener("keydown", handleEscape);
     };
   }, [closeAreaPicker, isAreaPickerOpen]);
+
+  const closeOfficialRainDialog = useCallback((restoreFocus = true) => {
+    setIsOfficialRainDialogOpen(false);
+
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => officialRainDialogTriggerRef.current?.focus());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOfficialRainDialogOpen) return;
+
+    const focusFrame = window.requestAnimationFrame(() => officialRainDialogCloseRef.current?.focus());
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeOfficialRainDialog();
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [closeOfficialRainDialog, isOfficialRainDialogOpen]);
 
   useEffect(() => {
     setActiveAreaOptionIndex((current) => Math.min(current, Math.max(0, areaOptions.length - 1)));
@@ -2368,6 +2397,31 @@ export default function FloodMap() {
     return () => window.clearTimeout(handle);
   }, [hasFinishedInitialLoad, loadingStage]);
 
+  const renderOfficialRainObservationContent = () => (
+    <>
+      <span>
+        PAGASA measured rain
+        {isOfficialRainfallRefreshing ? <em>Syncing</em> : null}
+      </span>
+      <strong>
+        {featuredOfficialGauge?.hourly_rain_mm !== null &&
+        featuredOfficialGauge?.hourly_rain_mm !== undefined
+          ? `${formatNumber(featuredOfficialGauge.hourly_rain_mm, 1)} mm`
+          : "Unavailable"}
+      </strong>
+      <small>
+        {featuredOfficialGauge
+          ? `${featuredOfficialGauge.site_name} · ${
+              featuredOfficialGauge.observed_at
+                ? `preceding hour at ${formatTime(featuredOfficialGauge.observed_at)}`
+                : "no observation time"
+            } · ${featuredOfficialGaugeState}`
+          : officialRainfallError || "Loading official Albay station observations…"}
+      </small>
+      <small>Station-specific measurement; not substituted into the area-wide model calculation.</small>
+    </>
+  );
+
   return (
     <main className="district-forward-page">
       <section
@@ -2418,6 +2472,50 @@ export default function FloodMap() {
                 })}
               </ol>
             </div>
+          </div>
+        ) : null}
+
+        {isOfficialRainDialogOpen ? (
+          <div
+            className="official-rain-dialog-backdrop"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) closeOfficialRainDialog();
+            }}
+          >
+            <section
+              id="official-rain-dialog"
+              className="official-rain-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="official-rain-dialog-title"
+              onKeyDown={(event) => {
+                if (event.key === "Tab") {
+                  event.preventDefault();
+                  officialRainDialogCloseRef.current?.focus();
+                }
+              }}
+            >
+              <header className="official-rain-dialog-header">
+                <div>
+                  <span>Official station reading</span>
+                  <h2 id="official-rain-dialog-title">Rain-gauge observation</h2>
+                </div>
+                <button
+                  ref={officialRainDialogCloseRef}
+                  type="button"
+                  onClick={() => closeOfficialRainDialog()}
+                  aria-label="Close rain-gauge observation"
+                >
+                  ×
+                </button>
+              </header>
+              <div
+                className={`official-rain-observation official-rain-observation-dialog ${featuredOfficialGaugeState}`}
+                aria-label="Latest official PAGASA rain-gauge observation in Albay"
+              >
+                {renderOfficialRainObservationContent()}
+              </div>
+            </section>
           </div>
         ) : null}
 
@@ -2585,6 +2683,18 @@ export default function FloodMap() {
             </div>
           </div>
           <div className="district-forward-header-actions">
+            <button
+              ref={officialRainDialogTriggerRef}
+              type="button"
+              className={`official-rain-observation-trigger ${featuredOfficialGaugeState}`}
+              onClick={() => setIsOfficialRainDialogOpen(true)}
+              aria-label="Show latest official PAGASA rain-gauge observation"
+              aria-haspopup="dialog"
+              aria-expanded={isOfficialRainDialogOpen}
+              aria-controls={isOfficialRainDialogOpen ? "official-rain-dialog" : undefined}
+            >
+              <span aria-hidden="true">!</span>
+            </button>
             <div
               className={`live-data-status ${liveFeedState}`}
               role="status"
@@ -2621,29 +2731,10 @@ export default function FloodMap() {
             </p>
 
             <div
-              className={`official-rain-observation ${featuredOfficialGaugeState}`}
+              className={`official-rain-observation official-rain-observation-inline ${featuredOfficialGaugeState}`}
               aria-label="Latest official PAGASA rain-gauge observation in Albay"
             >
-              <span>
-                PAGASA measured rain
-                {isOfficialRainfallRefreshing ? <em>Syncing</em> : null}
-              </span>
-              <strong>
-                {featuredOfficialGauge?.hourly_rain_mm !== null &&
-                featuredOfficialGauge?.hourly_rain_mm !== undefined
-                  ? `${formatNumber(featuredOfficialGauge.hourly_rain_mm, 1)} mm`
-                  : "Unavailable"}
-              </strong>
-              <small>
-                {featuredOfficialGauge
-                  ? `${featuredOfficialGauge.site_name} · ${
-                      featuredOfficialGauge.observed_at
-                        ? `preceding hour at ${formatTime(featuredOfficialGauge.observed_at)}`
-                        : "no observation time"
-                    } · ${featuredOfficialGaugeState}`
-                  : officialRainfallError || "Loading official Albay station observations…"}
-              </small>
-              <small>Station-specific measurement; not substituted into the area-wide model calculation.</small>
+              {renderOfficialRainObservationContent()}
             </div>
 
             <div className="district-forward-matrix" aria-label={`Model-point snapshot for ${location.label}`}>

@@ -705,6 +705,160 @@ main {
   line-height: 1.35;
 }
 
+.official-rain-observation-trigger {
+  align-items: center;
+  background: #eef8f2;
+  border: 1px solid #147d51;
+  color: #0d6843;
+  cursor: pointer;
+  display: none;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+
+.official-rain-observation-trigger > span {
+  align-items: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  display: inline-flex;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 17px;
+  font-weight: 700;
+  height: 27px;
+  justify-content: center;
+  line-height: 1;
+  width: 27px;
+}
+
+.official-rain-observation-trigger.stale {
+  background: #fff5dd;
+  border-color: #b37400;
+  color: #8a5900;
+}
+
+.official-rain-observation-trigger.unavailable {
+  background: #f3f4f2;
+  border-color: #777e7a;
+  color: #626965;
+}
+
+.official-rain-observation-trigger:hover,
+.official-rain-observation-trigger:focus-visible {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.official-rain-dialog-backdrop {
+  align-items: center;
+  backdrop-filter: blur(8px);
+  background: rgba(5, 12, 14, 0.68);
+  display: grid;
+  inset: 0;
+  justify-items: center;
+  padding: clamp(14px, 4vw, 40px);
+  position: fixed;
+  z-index: 95;
+}
+
+.official-rain-dialog {
+  animation: official-rain-dialog-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  background: #f7f8f6;
+  border: 1px solid var(--line);
+  box-shadow: 7px 7px 0 rgba(13, 17, 18, 0.88);
+  max-width: 430px;
+  width: 100%;
+}
+
+.official-rain-dialog-header {
+  align-items: flex-start;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 15px 16px 14px;
+}
+
+.official-rain-dialog-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.official-rain-dialog-header span {
+  color: var(--cool);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.official-rain-dialog-header h2 {
+  font-size: clamp(22px, 6vw, 29px);
+  letter-spacing: -0.035em;
+  line-height: 1;
+  margin: 0;
+}
+
+.official-rain-dialog-header button {
+  align-items: center;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 23px;
+  height: 38px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 38px;
+}
+
+.official-rain-dialog-header button:hover,
+.official-rain-dialog-header button:focus-visible {
+  background: var(--accent);
+  border-color: var(--accent);
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.official-rain-observation-dialog {
+  gap: 5px;
+  margin: 16px;
+  padding: 13px 14px;
+}
+
+.official-rain-observation-dialog > span {
+  font-size: 10px;
+}
+
+.official-rain-observation-dialog strong {
+  font-size: 32px;
+}
+
+.official-rain-observation-dialog small {
+  font-size: 9px;
+}
+
+@keyframes official-rain-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .district-forward-cta {
   margin-top: 8px;
   display: inline-block;
@@ -1762,6 +1916,22 @@ input[type="range"] {
     display: none;
   }
 
+  .official-rain-observation-inline {
+    display: none;
+  }
+
+  .official-rain-observation-trigger {
+    display: inline-flex;
+    height: 38px;
+    width: 38px;
+  }
+
+  .official-rain-observation-trigger > span {
+    font-size: 15px;
+    height: 24px;
+    width: 24px;
+  }
+
   .district-forward-matrix {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -1909,6 +2079,26 @@ input[type="range"] {
 }
 
 @media (max-width: 560px) {
+  .official-rain-dialog-backdrop {
+    align-items: end;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      8px
+      max(8px, env(safe-area-inset-bottom));
+  }
+
+  .official-rain-dialog {
+    box-shadow: 5px 5px 0 rgba(13, 17, 18, 0.88);
+  }
+
+  .official-rain-dialog-header {
+    padding: 13px 13px 12px;
+  }
+
+  .official-rain-observation-dialog {
+    margin: 12px;
+  }
+
   .area-search-backdrop {
     align-items: stretch;
     padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
@@ -1997,6 +2187,17 @@ input[type="range"] {
 
   .district-forward-header small {
     display: none;
+  }
+
+  .official-rain-observation-trigger {
+    height: 34px;
+    width: 34px;
+  }
+
+  .official-rain-observation-trigger > span {
+    font-size: 14px;
+    height: 22px;
+    width: 22px;
   }
 
   .live-data-status {
@@ -2326,6 +2527,10 @@ input[type="range"] {
   .readings-panel-content,
   .readings-rail-toggle {
     transition: none;
+  }
+
+  .official-rain-dialog {
+    animation: none;
   }
 }
 
