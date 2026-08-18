@@ -408,4 +408,4 @@ Do not commit `.env.local`, private tokens, or provider credentials.
 
 ## License
 
-This repository does not currently declare a software license. Unless a license is added, do not assume permission to redistribute or reuse the project beyond rights granted by the repository owner. Third-party data and services remain subject to their own licenses and terms.
+This project is released under the [MIT License](LICENSE). Third-party data and services remain subject to their own licenses and terms.
