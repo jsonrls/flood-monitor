@@ -7,10 +7,21 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import * as turf from "@turf/turf";
 import type { Feature, FeatureCollection, Polygon, Point, LineString, MultiLineString, MultiPolygon } from "geojson";
 import FloodLoadingIcon from "./FloodLoadingIcon";
+import { DATA_SOURCES, VERIFIED_ALBAY_COVERAGE } from "@/lib/dataSources";
 
 type WeatherResponse = {
+  latitude: number;
+  longitude: number;
+  utc_offset_seconds: number;
+  timezone_abbreviation?: string;
   current_units: {
+    time: string;
+    interval: string;
+    temperature_2m: string;
     precipitation: string;
+    weather_code: string;
+    wind_speed_10m: string;
+    wind_direction_10m: string;
   };
   current: {
     time: string;
@@ -18,32 +29,120 @@ type WeatherResponse = {
     temperature_2m: number;
     precipitation: number;
     weather_code: number;
+    wind_speed_10m: number;
+    wind_direction_10m: number;
   };
   hourly: {
     time: string[];
     precipitation: number[];
+    wind_speed_10m: number[];
+    wind_direction_10m: number[];
+  };
+  hourly_units: {
+    time: string;
+    precipitation: string;
+    wind_speed_10m: string;
+    wind_direction_10m: string;
   };
   elevation: number;
   timezone: string;
+  _provenance: {
+    provider: string;
+    documentation_url: string;
+    dataset: string;
+    served_at: string;
+    requested_coordinates: {
+      latitude: number;
+      longitude: number;
+    };
+  };
 };
 
-type OverpassElement = {
-  type: string;
-  id: number;
-  geometry?: {
-    lat: number;
-    lon: number;
-  }[];
-  tags?: Record<string, string>;
+type OfficialRainGaugeStation = {
+  site_id: string;
+  site_name: string;
+  hourly_rain_mm: number | null;
+  elevation_m: number | null;
+  observed_at: string | null;
+  freshness: "current" | "stale" | "unavailable";
 };
 
-type OverpassResponse = {
-  elements: OverpassElement[];
+type OfficialRainfallResponse = {
+  provider: string;
+  source_url: string;
+  station_scope: "Albay";
+  period: "preceding hour";
+  unit: "mm";
+  retrieved_at: string;
+  freshness_threshold_minutes: number;
+  stations: OfficialRainGaugeStation[];
 };
 
 type HydroGeometry = LineString | Polygon | MultiLineString | MultiPolygon;
 type HydroFeature = Feature<HydroGeometry>;
 type HydroFeatureCollection = FeatureCollection<HydroGeometry>;
+type HydrologyScope = "province" | "municipality" | "barangay";
+type PreparedBoundaryPart = {
+  feature: Feature<Polygon>;
+  bounds: [number, number, number, number];
+};
+
+type HydrologyCounts = {
+  rivers: number;
+  streams: number;
+  canals: number;
+  drains: number;
+  ditches: number;
+  tidalChannels: number;
+  otherWaterways: number;
+  waterbodies: number;
+};
+
+type HydrologyResponse = {
+  data: HydroFeatureCollection;
+  counts: HydrologyCounts;
+  _provenance: {
+    provider: "OpenStreetMap";
+    copyright_url: string;
+    served_at: string;
+    dataset_updated_at: string | null;
+    selected_area: {
+      scope: HydrologyScope;
+      code: string;
+      name: string;
+      boundary_source: string;
+      boundary_snapshot: string;
+      code_source: string;
+      code_snapshot: string;
+    };
+    query_bounds: {
+      south: number;
+      west: number;
+      north: number;
+      east: number;
+    };
+    selection_method: "administrative-boundary-intersection";
+    upstream_hosts: string[];
+    retrieval_mode: "overpass";
+    source_validation: {
+      schema: "passed";
+      attribution: "passed";
+      geometry: "passed";
+      freshness: "fresh-overpass-snapshot";
+      snapshot_age_seconds: number | null;
+      maximum_snapshot_age_seconds: number;
+    };
+    waterway_lines: "included" | "temporarily unavailable";
+    way_waterbodies: "included" | "temporarily unavailable";
+    relation_waterbodies: "included" | "temporarily unavailable";
+  };
+};
+
+type PersistentHydrologyCacheEntry = {
+  schemaVersion: 2;
+  storedAt: number;
+  payload: HydrologyResponse;
+};
 
 type BarangayProperties = {
   code: string;
@@ -55,9 +154,20 @@ type BarangayProperties = {
   provinceName: string;
 };
 
+type BarangayDatasetMetadata = {
+  province: string;
+  provinceCode: string;
+  snapshot: string;
+  boundarySource: string;
+  codeSource: string;
+  featureCount: number;
+};
+
 type BarangayGeometry = Polygon | MultiPolygon;
 type BarangayFeature = Feature<BarangayGeometry, BarangayProperties>;
-type BarangayFeatureCollection = FeatureCollection<BarangayGeometry, BarangayProperties>;
+type BarangayFeatureCollection = FeatureCollection<BarangayGeometry, BarangayProperties> & {
+  metadata?: BarangayDatasetMetadata;
+};
 
 type FocusLocation = {
   lat: number;
@@ -89,12 +199,12 @@ type Analysis = {
   radiusAreaKm2: number;
   precipWindowMm: number;
   estimatedWaterLiters: number;
-  riskIndex: number;
-  riskColor: string;
   selectedForecastHour: number;
   selectedRainRateMmPerHour: number;
-  windowStartHour: number;
-  windowEndHour: number;
+  selectedWindSpeedKph: number;
+  selectedWindDirectionDegrees: number;
+  windowStartTime: string;
+  windowEndTime: string;
 };
 
 type LayerVisibility = {
@@ -106,27 +216,277 @@ type LayerVisibility = {
 };
 
 type HydrologyStatus = "idle" | "loading" | "ready" | "error";
+type TimelinePlaybackSpeed = 1 | 2 | 3 | 4;
 
 type RainParticle = {
   x: number;
   y: number;
   radius: number;
   speed: number;
-  drift: number;
+  windResponse: number;
+  turbulence: number;
   opacity: number;
 };
 
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const WEATHER_FOCUS_REFRESH_MS = 2 * 60 * 1000;
 const WEATHER_STALE_AFTER_MS = 12 * 60 * 1000;
+const HYDROLOGY_RESPONSE_STALE_AFTER_MS = 20 * 60 * 1000;
+const HYDROLOGY_PERSISTED_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const HYDROLOGY_CACHE_SKIP_REFRESH_MS = 10 * 60 * 1000;
+const HYDROLOGY_CACHE_KEY_PREFIX = "albay-flood-monitor:hydrology:v2:";
+const HYDROLOGY_CACHE_MAX_ENTRIES = 6;
+const HYDROLOGY_MAX_OVERPASS_LAG_SECONDS = 6 * 60 * 60;
+const SOURCE_CLOCK_SKEW_MS = 5 * 60 * 1000;
+const TIMELINE_FRAME_INTERVAL_MS = 900;
+const HYDROLOGY_COUNT_KEYS: Array<keyof HydrologyCounts> = [
+  "rivers",
+  "streams",
+  "canals",
+  "drains",
+  "ditches",
+  "tidalChannels",
+  "otherWaterways",
+  "waterbodies"
+];
+const ALLOWED_WATERWAY_TYPES = new Set(["river", "stream", "canal", "drain", "ditch", "tidal_channel"]);
+const ALLOWED_HYDROLOGY_HOSTS = new Set(
+  DATA_SOURCES.hydrology.overpassEndpoints.map((endpoint) => new URL(endpoint).hostname)
+);
+
+const combineAreaBoundaries = (
+  area: BarangayFeature | BarangayFeatureCollection | null
+): Feature<Polygon | MultiPolygon> | null => {
+  if (!area) return null;
+  const features = area.type === "FeatureCollection" ? area.features : [area];
+  if (features.length === 0) return null;
+  if (features.length === 1) return features[0];
+
+  const flattened = turf.flatten(
+    turf.featureCollection(features)
+  ) as FeatureCollection<Polygon, BarangayProperties>;
+  const dissolved = turf.dissolve(flattened);
+  if (dissolved.features.length === 1) return dissolved.features[0];
+
+  const polygons: MultiPolygon["coordinates"] = [];
+  dissolved.features.forEach((feature) => {
+    polygons.push(feature.geometry.coordinates);
+  });
+  return turf.multiPolygon(polygons);
+};
+
+const prepareBoundaryParts = (
+  boundary: Feature<Polygon | MultiPolygon> | null
+): PreparedBoundaryPart[] => {
+  if (!boundary) return [];
+  return (turf.flatten(boundary) as FeatureCollection<Polygon>).features.map((feature) => ({
+    feature,
+    bounds: turf.bbox(feature) as [number, number, number, number]
+  }));
+};
+
+const intersectsBoundaryParts = (feature: Feature, boundaryParts: PreparedBoundaryPart[]) => {
+  const [featureWest, featureSouth, featureEast, featureNorth] = turf.bbox(feature);
+  return boundaryParts.some(({ feature: boundaryPart, bounds: [west, south, east, north] }) => {
+    if (featureEast < west || featureWest > east || featureNorth < south || featureSouth > north) return false;
+    return turf.booleanIntersects(feature, boundaryPart);
+  });
+};
+
+const hydrologyCacheKey = (areaKey: string) => `${HYDROLOGY_CACHE_KEY_PREFIX}${areaKey}`;
+
+const removeHydrologyCacheEntry = (key: string) => {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in private browsing or restricted contexts.
+  }
+};
+
+const readHydrologyCacheEntry = (key: string): PersistentHydrologyCacheEntry | null => {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) return null;
+    const entry = JSON.parse(stored) as PersistentHydrologyCacheEntry;
+    if (
+      entry?.schemaVersion !== 2 ||
+      !Number.isFinite(entry.storedAt) ||
+      typeof entry.payload !== "object" ||
+      entry.payload === null
+    ) {
+      removeHydrologyCacheEntry(key);
+      return null;
+    }
+    return entry;
+  } catch {
+    removeHydrologyCacheEntry(key);
+    return null;
+  }
+};
+
+const trimHydrologyCache = (preserveKey: string) => {
+  try {
+    const entries: Array<{ key: string; storedAt: number }> = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(HYDROLOGY_CACHE_KEY_PREFIX) || key === preserveKey) continue;
+      try {
+        const value = JSON.parse(window.localStorage.getItem(key) ?? "null") as { storedAt?: unknown } | null;
+        entries.push({ key, storedAt: typeof value?.storedAt === "number" ? value.storedAt : 0 });
+      } catch {
+        entries.push({ key, storedAt: 0 });
+      }
+    }
+    entries
+      .sort((a, b) => b.storedAt - a.storedAt)
+      .slice(HYDROLOGY_CACHE_MAX_ENTRIES - 1)
+      .forEach((entry) => window.localStorage.removeItem(entry.key));
+  } catch {
+    // Cache eviction is best-effort and must never block live GIS data.
+  }
+};
+
+const writeHydrologyCacheEntry = (key: string, payload: HydrologyResponse) => {
+  const serialized = JSON.stringify({ schemaVersion: 2, storedAt: Date.now(), payload });
+  try {
+    trimHydrologyCache(key);
+    window.localStorage.setItem(key, serialized);
+  } catch {
+    try {
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const storedKey = window.localStorage.key(index);
+        if (storedKey?.startsWith(HYDROLOGY_CACHE_KEY_PREFIX) && storedKey !== key) {
+          window.localStorage.removeItem(storedKey);
+        }
+      }
+      window.localStorage.setItem(key, serialized);
+    } catch {
+      // The app continues with its in-memory response when persistent storage is unavailable.
+    }
+  }
+};
+
+const validateHydrologyResponse = (
+  payloadValue: unknown,
+  expectedScope: HydrologyScope,
+  expectedCode: string,
+  expectedBounds: [number, number, number, number],
+  selectedBoundaryParts: PreparedBoundaryPart[],
+  maximumResponseAgeMs: number,
+  validationTime = Date.now()
+): payloadValue is HydrologyResponse => {
+  const payload = payloadValue as HydrologyResponse;
+  const hasValidFeatures =
+    payload?.data?.type === "FeatureCollection" &&
+    Array.isArray(payload.data.features) &&
+    payload.data.features.every((feature) => {
+      const properties = feature.properties;
+      const sourceEditedAt = new Date(properties?.sourceLastEditedAt).valueOf();
+      const isWaterway =
+        properties?.featureClass === "waterway" &&
+        properties.sourceType === "way" &&
+        (feature.geometry?.type === "LineString" || feature.geometry?.type === "MultiLineString") &&
+        ALLOWED_WATERWAY_TYPES.has(properties.waterway);
+      const isWaterbody =
+        properties?.featureClass === "waterbody" &&
+        (feature.geometry?.type === "Polygon" || feature.geometry?.type === "MultiPolygon") &&
+        (properties.sourceType === "way" || properties.sourceType === "relation");
+
+      const hasValidSource =
+        feature.type === "Feature" &&
+        (isWaterway || isWaterbody) &&
+        Number.isSafeInteger(properties?.sourceId) &&
+        properties!.sourceId > 0 &&
+        Number.isSafeInteger(properties?.sourceVersion) &&
+        properties!.sourceVersion > 0 &&
+        Number.isFinite(sourceEditedAt) &&
+        sourceEditedAt <= validationTime + SOURCE_CLOCK_SKEW_MS &&
+        properties?.sourceUrl ===
+          `https://www.openstreetmap.org/${properties.sourceType}/${properties.sourceId}`;
+      if (!hasValidSource) return false;
+
+      try {
+        return intersectsBoundaryParts(feature, selectedBoundaryParts);
+      } catch {
+        return false;
+      }
+    });
+  const hasValidCounts =
+    payload?.counts &&
+    HYDROLOGY_COUNT_KEYS.every(
+      (key) => Number.isSafeInteger(payload.counts[key]) && payload.counts[key] >= 0
+    );
+  const countTotal = hasValidCounts
+    ? HYDROLOGY_COUNT_KEYS.reduce((total, key) => total + payload.counts[key], 0)
+    : -1;
+  const servedAt = new Date(payload?._provenance?.served_at).valueOf();
+  const sourceDatasetUpdatedAt = payload?._provenance?.dataset_updated_at
+    ? new Date(payload._provenance.dataset_updated_at).valueOf()
+    : null;
+  const validation = payload?._provenance?.source_validation;
+  const hasValidFreshness =
+    validation?.schema === "passed" &&
+    validation.attribution === "passed" &&
+    validation.geometry === "passed" &&
+    validation.maximum_snapshot_age_seconds === HYDROLOGY_MAX_OVERPASS_LAG_SECONDS &&
+    validation.freshness === "fresh-overpass-snapshot" &&
+    Number.isFinite(validation.snapshot_age_seconds) &&
+    validation.snapshot_age_seconds! >= 0 &&
+    validation.snapshot_age_seconds! <= validation.maximum_snapshot_age_seconds &&
+    sourceDatasetUpdatedAt !== null &&
+    sourceDatasetUpdatedAt <= servedAt + SOURCE_CLOCK_SKEW_MS &&
+    validationTime - sourceDatasetUpdatedAt <= validation.maximum_snapshot_age_seconds * 1000;
+  const hasValidCompleteness = [
+    payload?._provenance?.waterway_lines,
+    payload?._provenance?.way_waterbodies,
+    payload?._provenance?.relation_waterbodies
+  ].every((state) => state === "included");
+  const queryBounds = payload?._provenance?.query_bounds;
+  const [expectedWest, expectedSouth, expectedEast, expectedNorth] = expectedBounds;
+  const hasExpectedBounds =
+    Number.isFinite(queryBounds?.south) &&
+    Number.isFinite(queryBounds?.west) &&
+    Number.isFinite(queryBounds?.north) &&
+    Number.isFinite(queryBounds?.east) &&
+    Math.abs(queryBounds.south - expectedSouth) < 1e-6 &&
+    Math.abs(queryBounds.west - expectedWest) < 1e-6 &&
+    Math.abs(queryBounds.north - expectedNorth) < 1e-6 &&
+    Math.abs(queryBounds.east - expectedEast) < 1e-6;
+  const hasValidProvenance =
+    payload?._provenance?.provider === "OpenStreetMap" &&
+    payload._provenance.copyright_url === DATA_SOURCES.hydrology.copyrightUrl &&
+    Number.isFinite(servedAt) &&
+    servedAt <= validationTime + SOURCE_CLOCK_SKEW_MS &&
+    validationTime - servedAt <= maximumResponseAgeMs &&
+    payload._provenance.selected_area?.scope === expectedScope &&
+    payload._provenance.selected_area?.code === expectedCode &&
+    payload._provenance.selected_area?.boundary_source === "NAMRIA" &&
+    payload._provenance.selected_area?.boundary_snapshot === DATA_SOURCES.administrativeGeometry.snapshot &&
+    payload._provenance.selected_area?.code_source === "Philippine Statistics Authority PSGC" &&
+    payload._provenance.selected_area?.code_snapshot === DATA_SOURCES.administrativeNames.snapshot &&
+    payload._provenance.selection_method === "administrative-boundary-intersection" &&
+    payload._provenance.retrieval_mode === "overpass" &&
+    hasExpectedBounds &&
+    Array.isArray(payload._provenance.upstream_hosts) &&
+    payload._provenance.upstream_hosts.length > 0 &&
+    payload._provenance.upstream_hosts.every((host) => ALLOWED_HYDROLOGY_HOSTS.has(host)) &&
+    hasValidCompleteness &&
+    hasValidFreshness;
+
+  return hasValidFeatures && countTotal === payload?.data?.features.length && hasValidProvenance;
+};
 const ALBAY_PROVINCE_CODE = "05005";
+const RAIN_ANALYSIS_ZONE_COLOR = "#2f9d67";
 // A generous margin keeps Albay's outer islands visible in the pitched 3D view
 // while still preventing users from navigating far away from the province.
 const ALBAY_MAP_BOUNDS_PADDING_RATIO = 0.3;
 const ALBAY_VIEWPORT_FOOTPRINT_ALLOWANCE = 1.15;
+// Bootstrap coordinate generated with Turf pointOnFeature from the validated
+// bundled province collection. Network requests wait for that collection to
+// pass validation, so this value is only an initial render seed.
 const ALBAY_PROVINCE_FOCUS: FocusLocation = {
-  lat: 13.1775,
-  lng: 123.528,
+  lat: 13.252353189500042,
+  lng: 123.75041695450005,
   label: "Albay Province"
 };
 
@@ -161,16 +521,23 @@ const WEATHER_CODE_MAP: Record<number, string> = {
   99: "Thunderstorm with heavy hail"
 };
 
+const WIND_DIRECTION_LABELS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+
+const formatWindDirection = (degrees: number) => {
+  const normalizedDegrees = ((degrees % 360) + 360) % 360;
+  return WIND_DIRECTION_LABELS[Math.round(normalizedDegrees / 45) % WIND_DIRECTION_LABELS.length];
+};
+
 const INITIAL_LOADING_STEPS: ReadonlyArray<{ label: string; title: string; detail: string }> = [
   {
     label: "Area",
     title: "Loading Albay coverage",
-    detail: "Preparing province-wide boundaries with Legazpi City as the default focus."
+    detail: "Preparing province-wide boundaries with Albay Province as the default focus."
   },
   {
     label: "Weather",
     title: "Syncing rainfall data",
-    detail: "Loading measured and forecast precipitation from Open-Meteo."
+    detail: "Loading model-based current and forecast precipitation from Open-Meteo."
   },
   {
     label: "3D map",
@@ -180,13 +547,13 @@ const INITIAL_LOADING_STEPS: ReadonlyArray<{ label: string; title: string; detai
   {
     label: "GIS layers",
     title: "Indexing nearby waterways",
-    detail: "Preparing river, stream, waterbody, and administrative boundary geometries."
+    detail: "Loading volunteered OpenStreetMap water features and verified administrative boundaries."
   }
 ];
 
 const READY_LOADING_STAGE = {
-  title: "Live map ready",
-  detail: "Area, rainfall, terrain, and GIS layers are synchronized."
+  title: "Source data ready",
+  detail: "Weather-model, boundary, terrain, and contextual GIS sources are loaded."
 };
 
 const toFeatureCollection = (): HydroFeatureCollection => ({
@@ -198,6 +565,87 @@ const toBarangayFeatureCollection = (): BarangayFeatureCollection => ({
   type: "FeatureCollection",
   features: []
 });
+
+const validateAndNormalizeBarangayData = (value: unknown): BarangayFeatureCollection => {
+  const collection = value as Partial<BarangayFeatureCollection>;
+
+  if (collection.type !== "FeatureCollection" || !Array.isArray(collection.features)) {
+    throw new Error("Barangay boundary file is not a GeoJSON FeatureCollection.");
+  }
+
+  const metadata = collection.metadata;
+  if (
+    metadata?.province !== "Albay" ||
+    metadata.provinceCode !== ALBAY_PROVINCE_CODE ||
+    metadata.snapshot !== DATA_SOURCES.administrativeNames.snapshot ||
+    metadata.boundarySource !== "NAMRIA" ||
+    metadata.codeSource !== "Philippine Statistics Authority PSGC" ||
+    metadata.featureCount !== VERIFIED_ALBAY_COVERAGE.barangays ||
+    collection.features.length !== metadata.featureCount
+  ) {
+    throw new Error("Barangay boundary provenance metadata does not match the verified Albay dataset.");
+  }
+
+  const seenBarangayCodes = new Set<string>();
+  const municipalityCodes = new Set<string>();
+  const normalizedFeatures = collection.features.map((candidate, index) => {
+    const feature = candidate as Partial<BarangayFeature>;
+    const properties = feature.properties as Partial<BarangayProperties> | undefined;
+    const geometry = feature.geometry;
+
+    if (
+      feature.type !== "Feature" ||
+      !geometry ||
+      (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") ||
+      !properties ||
+      !/^\d{10}$/.test(properties.code ?? "") ||
+      !/^\d{10}$/.test(properties.municipalityCode ?? "") ||
+      properties.provinceCode !== ALBAY_PROVINCE_CODE ||
+      properties.provinceName !== "Albay" ||
+      typeof properties.name !== "string" ||
+      properties.name.trim().length === 0 ||
+      typeof properties.municipalityName !== "string" ||
+      properties.municipalityName.trim().length === 0
+    ) {
+      throw new Error(`Barangay boundary feature ${index + 1} is incomplete or invalid.`);
+    }
+
+    const barangayCode = properties.code as string;
+    const municipalityCode = properties.municipalityCode as string;
+
+    if (seenBarangayCodes.has(barangayCode)) {
+      throw new Error(`Barangay boundary file contains duplicate PSGC code ${barangayCode}.`);
+    }
+
+    const areaSqKm = turf.area(feature as BarangayFeature) / 1_000_000;
+    if (!Number.isFinite(areaSqKm) || areaSqKm <= 0) {
+      throw new Error(`Barangay ${barangayCode} has an invalid boundary area.`);
+    }
+
+    seenBarangayCodes.add(barangayCode);
+    municipalityCodes.add(municipalityCode);
+
+    return {
+      ...(feature as BarangayFeature),
+      properties: {
+        ...(properties as BarangayProperties),
+        areaSqKm
+      }
+    };
+  });
+
+  if (municipalityCodes.size !== VERIFIED_ALBAY_COVERAGE.localGovernmentUnits) {
+    throw new Error(
+      `Boundary file has ${municipalityCodes.size} LGUs; PSA reports ${VERIFIED_ALBAY_COVERAGE.localGovernmentUnits}.`
+    );
+  }
+
+  return {
+    type: "FeatureCollection",
+    metadata,
+    features: normalizedFeatures
+  };
+};
 
 const barangayNameCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
@@ -226,6 +674,12 @@ const findClosestTimeIndex = (times: string[], targetTime: string) => {
   }, 0);
 };
 
+const shiftLocalIsoTime = (isoTime: string, offsetMinutes: number) => {
+  const wallClockTime = new Date(`${isoTime}Z`);
+  if (Number.isNaN(wallClockTime.valueOf())) return isoTime;
+  return new Date(wallClockTime.valueOf() + offsetMinutes * 60_000).toISOString().slice(0, 16);
+};
+
 export default function FloodMap() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const rainCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -237,7 +691,9 @@ export default function FloodMap() {
   const weatherRequestIdRef = useRef(0);
   const weatherLastRequestAtRef = useRef(0);
   const lastWeatherUpdatedAtRef = useRef<number | null>(null);
+  const officialRainfallRequestIdRef = useRef(0);
   const hydrologyRequestIdRef = useRef(0);
+  const radiusWasAdjustedRef = useRef(false);
   const lastMapFitRef = useRef("");
   const areaPickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const areaSearchInputRef = useRef<HTMLInputElement | null>(null);
@@ -246,12 +702,16 @@ export default function FloodMap() {
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [isWeatherRefreshing, setIsWeatherRefreshing] = useState(false);
   const [lastWeatherUpdatedAt, setLastWeatherUpdatedAt] = useState<number | null>(null);
+  const [officialRainfall, setOfficialRainfall] = useState<OfficialRainfallResponse | null>(null);
+  const [officialRainfallError, setOfficialRainfallError] = useState<string | null>(null);
+  const [isOfficialRainfallRefreshing, setIsOfficialRainfallRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [clockNow, setClockNow] = useState<number | null>(null);
   const [radiusKm, setRadiusKm] = useState(0);
   const [hoursWindow, setHoursWindow] = useState(24);
   const [forecastHour, setForecastHour] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+  const [timelinePlaybackSpeed, setTimelinePlaybackSpeed] = useState<TimelinePlaybackSpeed>(1);
   const [barangayData, setBarangayData] = useState<BarangayFeatureCollection>(toBarangayFeatureCollection());
   const [selectedMunicipalityCode, setSelectedMunicipalityCode] = useState("");
   const [selectedBarangayCode, setSelectedBarangayCode] = useState("");
@@ -271,8 +731,11 @@ export default function FloodMap() {
   const [hydroData, setHydroData] = useState<HydroFeatureCollection>(toFeatureCollection());
   const [hydroError, setHydroError] = useState<string | null>(null);
   const [hydrologyStatus, setHydrologyStatus] = useState<HydrologyStatus>("idle");
+  const [hydrologyRetrievedAt, setHydrologyRetrievedAt] = useState<number | null>(null);
+  const [hydrologyDatasetUpdatedAt, setHydrologyDatasetUpdatedAt] = useState<number | null>(null);
   const [hasFinishedInitialLoad, setHasFinishedInitialLoad] = useState(false);
   const [isMobileLegendOpen, setIsMobileLegendOpen] = useState(false);
+  const [isReadingsPanelOpen, setIsReadingsPanelOpen] = useState(true);
 
   const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const barangayOptions = useMemo(
@@ -283,6 +746,20 @@ export default function FloodMap() {
     if (barangayData.features.length === 0) return null;
     return turf.bbox(barangayData) as [number, number, number, number];
   }, [barangayData]);
+  const provinceCoverageRadiusKm = useMemo(() => {
+    if (barangayData.features.length === 0) return 0;
+
+    const provinceFocus = turf.pointOnFeature(barangayData);
+    let farthestBoundaryDistanceKm = 0;
+    turf.coordEach(barangayData, (coordinate) => {
+      farthestBoundaryDistanceKm = Math.max(
+        farthestBoundaryDistanceKm,
+        turf.distance(provinceFocus, coordinate, { units: "kilometers" })
+      );
+    });
+    return Math.ceil(farthestBoundaryDistanceKm);
+  }, [barangayData]);
+  const radiusSliderMaxKm = Math.max(60, Math.ceil(provinceCoverageRadiusKm / 10) * 10);
   const municipalityOptions = useMemo<MunicipalitySummary[]>(() => {
     const municipalityMap = new Map<string, MunicipalitySummary>();
 
@@ -355,6 +832,24 @@ export default function FloodMap() {
     : selectedMunicipalityCode
       ? `municipality:${selectedMunicipalityCode}`
       : `province:${ALBAY_PROVINCE_CODE}`;
+  const selectedHydrologyScope: HydrologyScope = selectedBarangayCode
+    ? "barangay"
+    : selectedMunicipalityCode
+      ? "municipality"
+      : "province";
+  const selectedHydrologyCode = selectedBarangayCode || selectedMunicipalityCode || ALBAY_PROVINCE_CODE;
+  const selectedHydrologyBoundary = useMemo(
+    () => combineAreaBoundaries(selectedAreaGeoJson),
+    [selectedAreaGeoJson]
+  );
+  const selectedHydrologyBoundaryParts = useMemo(
+    () => prepareBoundaryParts(selectedHydrologyBoundary),
+    [selectedHydrologyBoundary]
+  );
+  const selectedHydrologyBounds = useMemo<[number, number, number, number] | null>(
+    () => selectedHydrologyBoundary ? turf.bbox(selectedHydrologyBoundary) as [number, number, number, number] : null,
+    [selectedHydrologyBoundary]
+  );
   const selectedAreaLevel = selectedBarangay ? "Barangay" : selectedMunicipality ? "City / municipality" : "Province";
   const selectedAreaSqKm = selectedBarangay
     ? selectedBarangay.properties.areaSqKm
@@ -374,13 +869,18 @@ export default function FloodMap() {
     ? `${selectedBarangay.properties.name} · ${formatMunicipalityName(selectedBarangay.properties.municipalityName)}`
     : selectedMunicipality
       ? `${selectedMunicipality.name} · ${selectedMunicipality.barangayCount} barangays`
-      : `Albay Province · ${municipalityOptions.length || 18} LGUs`;
+      : municipalityOptions.length > 0
+        ? `Albay Province · ${municipalityOptions.length} LGUs`
+        : "Albay Province · Loading verified coverage";
   const areaOptions = useMemo<AreaOption[]>(() => {
     const provinceOption: AreaOption = {
       key: `province:${ALBAY_PROVINCE_CODE}`,
       level: "province",
       label: "All Albay Province",
-      description: `${municipalityOptions.length || 18} cities & municipalities · ${barangayData.features.length || 720} barangays`
+      description:
+        barangayData.features.length > 0
+          ? `${municipalityOptions.length} cities & municipalities · ${barangayData.features.length} barangays`
+          : "Loading verified PSA / NAMRIA coverage"
     };
     const municipalityAreaOptions: AreaOption[] = municipalityOptions.map((municipality) => ({
       key: `municipality:${municipality.code}`,
@@ -447,6 +947,11 @@ export default function FloodMap() {
   );
 
   useEffect(() => {
+    if (provinceCoverageRadiusKm <= 0 || radiusWasAdjustedRef.current) return;
+    setRadiusKm(provinceCoverageRadiusKm);
+  }, [provinceCoverageRadiusKm]);
+
+  useEffect(() => {
     if (!isAreaPickerOpen) return;
 
     const focusFrame = window.requestAnimationFrame(() => areaSearchInputRef.current?.focus());
@@ -474,13 +979,6 @@ export default function FloodMap() {
   const maxForecastHour = Math.max(0, weatherHourCount - 1);
   const safeForecastHour = Math.min(Math.max(0, forecastHour), maxForecastHour);
 
-  const getRiskColor = useCallback((index: number) => {
-    if (index < 30) return "#10b981";
-    if (index < 50) return "#f59e0b";
-    if (index < 70) return "#f97316";
-    return "#ef4444";
-  }, []);
-
   const getWeatherLabel = useCallback((code: number) => {
     return WEATHER_CODE_MAP[code] ?? `Weather code ${code}`;
   }, []);
@@ -496,14 +994,19 @@ export default function FloodMap() {
     }).format(value);
 
   const formatTime = useCallback((isoTime: string) => {
-    const date = new Date(isoTime);
+    // Open-Meteo returns local wall-clock timestamps without a UTC offset when
+    // timezone=auto. Treat them as wall-clock values so browser timezone does
+    // not shift Albay dates and hours for users viewing from another region.
+    const hasExplicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(isoTime);
+    const date = new Date(hasExplicitOffset ? isoTime : `${isoTime}Z`);
     if (Number.isNaN(date.valueOf())) return isoTime;
 
     return date.toLocaleString(undefined, {
       month: "short",
       day: "numeric",
       hour: "2-digit",
-      minute: "2-digit"
+      minute: "2-digit",
+      ...(hasExplicitOffset ? {} : { timeZone: "UTC" })
     });
   }, []);
 
@@ -527,16 +1030,15 @@ export default function FloodMap() {
       safeForecastHour === currentWeatherHour
         ? currentRainRateMmPerHour
         : weather.hourly.precipitation[safeForecastHour];
+    const selectedWindSpeedKph =
+      safeForecastHour === currentWeatherHour
+        ? weather.current.wind_speed_10m
+        : weather.hourly.wind_speed_10m[safeForecastHour];
+    const selectedWindDirectionDegrees =
+      safeForecastHour === currentWeatherHour
+        ? weather.current.wind_direction_10m
+        : weather.hourly.wind_direction_10m[safeForecastHour];
     const estimatedWaterLiters = safeAreaSqM * precipWindowMm;
-
-    const currentRainIntensity = selectedRainRateMmPerHour;
-    const actualWindowHours = availableHours.length || 1;
-    const hourlyIntensity = precipWindowMm / actualWindowHours;
-    const lowElevationPenalty = Math.max(0, (30 - Math.min(weather.elevation, 30)) / 30);
-    const intensityScore = Math.min(100, (hourlyIntensity * 8 + currentRainIntensity * 9 + precipWindowMm) * 0.9);
-    const riskIndex = Math.round(Math.max(0, Math.min(100, intensityScore + lowElevationPenalty * 12)));
-
-    const riskColor = getRiskColor(riskIndex);
 
     return {
       radiusKm,
@@ -544,14 +1046,14 @@ export default function FloodMap() {
       radiusAreaKm2: safeAreaSqM / 1_000_000,
       precipWindowMm,
       estimatedWaterLiters,
-      riskIndex,
-      riskColor,
       selectedForecastHour: safeForecastHour,
       selectedRainRateMmPerHour,
-      windowStartHour: start,
-      windowEndHour: safeForecastHour
+      selectedWindSpeedKph,
+      selectedWindDirectionDegrees,
+      windowStartTime: shiftLocalIsoTime(weather.hourly.time[start], -60),
+      windowEndTime: weather.hourly.time[safeForecastHour]
     };
-  }, [location, weather, radiusKm, safeHours, safeForecastHour, getRiskColor]);
+  }, [location, weather, radiusKm, safeHours, safeForecastHour]);
 
   const hydroCounts = useMemo(
     () =>
@@ -561,124 +1063,129 @@ export default function FloodMap() {
             counts.waterAreas += 1;
           } else {
             counts.waterways += 1;
+            switch (feature.properties?.waterway) {
+              case "river": counts.rivers += 1; break;
+              case "stream": counts.streams += 1; break;
+              case "canal": counts.canals += 1; break;
+              case "drain": counts.drains += 1; break;
+              case "ditch": counts.ditches += 1; break;
+            }
           }
           return counts;
         },
-        { waterways: 0, waterAreas: 0 }
+        { waterways: 0, waterAreas: 0, rivers: 0, streams: 0, canals: 0, drains: 0, ditches: 0 }
       ),
     [hydroData]
   );
 
-  const convertOverpassToGeoJSON = useCallback((response: OverpassResponse): HydroFeatureCollection => {
-    const features: HydroFeature[] = [];
-
-    response.elements.forEach((element) => {
-      if (!element.geometry || element.geometry.length < 2) return;
-
-      const coordinates = element.geometry.map((point) => [point.lon, point.lat] as [number, number]);
-      const geometryType = element.tags?.waterway;
-
-      const isClosedRing =
-        coordinates[0]?.[0] === coordinates[coordinates.length - 1]?.[0] &&
-        coordinates[0]?.[1] === coordinates[coordinates.length - 1]?.[1];
-
-      const isAreaShape =
-        isClosedRing &&
-        (geometryType === "riverbank" ||
-          element.tags?.natural === "water" ||
-          element.tags?.area === "yes" ||
-          Boolean(element.tags?.water));
-
-      if (isAreaShape) {
-        const polygonCoordinates = [coordinates];
-        if (polygonCoordinates[0].length >= 4) {
-          features.push({
-            type: "Feature",
-            geometry: {
-              type: "Polygon",
-              coordinates: polygonCoordinates
-            },
-            properties: {
-              sourceId: element.id,
-              waterway: element.tags?.waterway || "water",
-              name: element.tags?.name || "Unnamed water feature",
-              type: element.tags?.waterway || element.tags?.natural || "water"
-            }
-          });
-        }
-      } else {
-        features.push({
-          type: "Feature",
-          geometry: {
-            type: "LineString",
-            coordinates
-          },
-          properties: {
-            sourceId: element.id,
-            waterway: element.tags?.waterway || "stream",
-            name: element.tags?.name || "Unnamed stream",
-            type: element.tags?.waterway || "stream"
-          }
-        });
-      }
-    });
-
-    return {
-      type: "FeatureCollection",
-      features
-    };
-  }, []);
-
   const fetchHydrology = useCallback(
-    async (lat: number, lng: number) => {
+    async () => {
+      if (!selectedHydrologyBoundary || !selectedHydrologyBounds) return;
+
       const requestId = ++hydrologyRequestIdRef.current;
-      setStatus("Loading nearby river/stream GIS layers...");
+      const cacheKey = hydrologyCacheKey(selectedAreaKey);
       setHydroError(null);
-      setHydrologyStatus("loading");
+      const applyPayload = (payload: HydrologyResponse, source: "cache" | "network") => {
+        setHydroError(null);
+        const retrievedAt = new Date(payload._provenance.served_at).valueOf();
+        const datasetUpdatedAt = payload._provenance.dataset_updated_at
+          ? new Date(payload._provenance.dataset_updated_at).valueOf()
+          : null;
+        setHydroData(payload.data);
+        setHydrologyStatus("ready");
+        setHydrologyRetrievedAt(retrievedAt);
+        setHydrologyDatasetUpdatedAt(datasetUpdatedAt);
+        setStatus(
+          source === "cache"
+            ? `Loaded ${payload.data.features.length} validated OpenStreetMap water features for ${payload._provenance.selected_area.name} from the browser cache.`
+            : `Loaded ${payload.data.features.length} current OpenStreetMap water features intersecting ${payload._provenance.selected_area.name}.`
+        );
+      };
+
+      let cachedPayload: HydrologyResponse | null = null;
+      const cachedEntry = readHydrologyCacheEntry(cacheKey);
+      if (
+        cachedEntry &&
+        validateHydrologyResponse(
+          cachedEntry.payload,
+          selectedHydrologyScope,
+          selectedHydrologyCode,
+          selectedHydrologyBounds,
+          selectedHydrologyBoundaryParts,
+          HYDROLOGY_PERSISTED_CACHE_MAX_AGE_MS
+        )
+      ) {
+        cachedPayload = cachedEntry.payload;
+        applyPayload(cachedPayload, "cache");
+        const cacheAgeMs = Date.now() - new Date(cachedPayload._provenance.served_at).valueOf();
+        const hasAllCategories =
+          cachedPayload._provenance.waterway_lines === "included" &&
+          cachedPayload._provenance.way_waterbodies === "included" &&
+          cachedPayload._provenance.relation_waterbodies === "included";
+        if (cacheAgeMs <= HYDROLOGY_CACHE_SKIP_REFRESH_MS && hasAllCategories) return;
+        setStatus("Showing validated cached water features while checking for an updated OSM snapshot...");
+      } else {
+        if (cachedEntry) removeHydrologyCacheEntry(cacheKey);
+        setStatus(`Loading all mapped water features for ${areaPickerLabel}...`);
+        setHydrologyStatus("loading");
+        setHydrologyRetrievedAt(null);
+        setHydrologyDatasetUpdatedAt(null);
+      }
 
       try {
-        const meters = Math.max(2000, Math.round(radiusKm * 1000));
-        const query = `
-          [out:json][timeout:25];
-          (
-            way["waterway"~"river|stream|canal|drain|ditch|riverbank|ditch"](around:${meters},${lat},${lng});
-            relation["waterway"~"river|stream|canal|drain|ditch|riverbank|ditch"](around:${meters},${lat},${lng});
-            way["natural"="water"](around:${meters},${lat},${lng});
-            relation["natural"="water"](around:${meters},${lat},${lng});
-          );
-          out geom;
-        `;
-
-        const body = new URLSearchParams({
-          data: query.trim()
+        const params = new URLSearchParams({
+          scope: selectedHydrologyScope,
+          code: selectedHydrologyCode
         });
-        const response = await fetch("https://overpass-api.de/api/interpreter", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-          },
-          body
-        });
+        const response = await fetch(`/api/hydrology?${params.toString()}`);
+        const payloadValue: unknown = await response.json();
+        const errorPayload = payloadValue as { error?: unknown };
 
         if (!response.ok) {
-          throw new Error(`Hydrology API returned ${response.status}`);
+          throw new Error(
+            typeof errorPayload.error === "string"
+              ? errorPayload.error
+              : `Hydrology API returned ${response.status}`
+          );
         }
-
-        const payload = (await response.json()) as OverpassResponse;
-        const collection = convertOverpassToGeoJSON(payload);
+        if (
+          !validateHydrologyResponse(
+            payloadValue,
+            selectedHydrologyScope,
+            selectedHydrologyCode,
+            selectedHydrologyBounds,
+            selectedHydrologyBoundaryParts,
+            HYDROLOGY_RESPONSE_STALE_AFTER_MS
+          )
+        ) {
+          throw new Error("Hydrology API returned an invalid OpenStreetMap dataset.");
+        }
         if (requestId !== hydrologyRequestIdRef.current) return;
 
-        setHydroData(collection);
-        setHydrologyStatus("ready");
-        setStatus("Nearby GIS layers loaded.");
+        applyPayload(payloadValue, "network");
+        writeHydrologyCacheEntry(cacheKey, payloadValue);
       } catch (err) {
         if (requestId !== hydrologyRequestIdRef.current) return;
 
-        setHydrologyStatus("error");
-        setHydroError((err as Error).message || "Failed to load nearby GIS water layers.");
+        if (cachedPayload) {
+          setHydrologyStatus("ready");
+          setHydroError("Live OpenStreetMap refresh failed; the previously validated browser cache remains visible.");
+          setStatus("Showing validated cached OpenStreetMap water features.");
+        } else {
+          setHydrologyStatus("error");
+          setHydroError((err as Error).message || "Failed to load GIS water layers for the selected area.");
+        }
       }
     },
-    [convertOverpassToGeoJSON, radiusKm]
+    [
+      areaPickerLabel,
+      selectedAreaKey,
+      selectedHydrologyBoundary,
+      selectedHydrologyBoundaryParts,
+      selectedHydrologyBounds,
+      selectedHydrologyCode,
+      selectedHydrologyScope
+    ]
   );
 
   const fetchWeather = useCallback(
@@ -688,7 +1195,7 @@ export default function FloodMap() {
 
       setIsWeatherRefreshing(true);
       setWeatherError(null);
-      setStatus(reason === "initial" ? "Loading live weather data..." : "Synchronizing live weather data...");
+      setStatus(reason === "initial" ? "Loading weather-model data..." : "Synchronizing weather-model data...");
 
       try {
         const params = new URLSearchParams({
@@ -702,17 +1209,71 @@ export default function FloodMap() {
           throw new Error(payload.error || `Weather service returned ${response.status}`);
         }
 
-        const hasValidHourlyRain =
+        const hasValidHourlyTimes =
           Array.isArray(payload.hourly?.time) &&
+          payload.hourly.time.every(
+            (time, index, times) =>
+              typeof time === "string" &&
+              Number.isFinite(new Date(`${time}Z`).valueOf()) &&
+              (index === 0 || time > times[index - 1])
+          );
+        const hasValidWeatherPayload =
+          hasValidHourlyTimes &&
           Array.isArray(payload.hourly?.precipitation) &&
+          Array.isArray(payload.hourly?.wind_speed_10m) &&
+          Array.isArray(payload.hourly?.wind_direction_10m) &&
           payload.hourly.time.length > 0 &&
           payload.hourly.time.length === payload.hourly.precipitation.length &&
+          payload.hourly.time.length === payload.hourly.wind_speed_10m.length &&
+          payload.hourly.time.length === payload.hourly.wind_direction_10m.length &&
           payload.hourly.precipitation.every((value) => Number.isFinite(value) && value >= 0) &&
+          payload.hourly.wind_speed_10m.every((value) => Number.isFinite(value) && value >= 0) &&
+          payload.hourly.wind_direction_10m.every(
+            (value) => Number.isFinite(value) && value >= 0 && value <= 360
+          ) &&
           Number.isFinite(payload.current?.precipitation) &&
-          Number.isFinite(payload.current?.weather_code);
+          payload.current.precipitation >= 0 &&
+          Number.isFinite(payload.current?.wind_speed_10m) &&
+          payload.current.wind_speed_10m >= 0 &&
+          Number.isFinite(payload.current?.wind_direction_10m) &&
+          payload.current.wind_direction_10m >= 0 &&
+          payload.current.wind_direction_10m <= 360 &&
+          Number.isFinite(payload.current?.interval) &&
+          payload.current.interval! > 0 &&
+          payload.current.interval! <= 3600 &&
+          Number.isFinite(payload.current?.temperature_2m) &&
+          Number.isInteger(payload.current?.weather_code) &&
+          payload.current.weather_code >= 0 &&
+          payload.current.weather_code <= 99 &&
+          typeof payload.current?.time === "string" &&
+          Number.isFinite(new Date(`${payload.current.time}Z`).valueOf()) &&
+          Number.isFinite(payload.elevation) &&
+          Number.isFinite(payload.latitude) &&
+          Number.isFinite(payload.longitude) &&
+          Number.isFinite(payload.utc_offset_seconds) &&
+          typeof payload.timezone === "string" &&
+          payload.timezone.length > 0 &&
+          payload.current_units?.precipitation === "mm" &&
+          payload.current_units?.temperature_2m === "°C" &&
+          payload.current_units?.weather_code === "wmo code" &&
+          payload.current_units?.wind_speed_10m === "km/h" &&
+          payload.current_units?.wind_direction_10m === "°" &&
+          payload.current_units?.time === "iso8601" &&
+          payload.hourly_units?.precipitation === "mm" &&
+          payload.hourly_units?.wind_speed_10m === "km/h" &&
+          payload.hourly_units?.wind_direction_10m === "°" &&
+          payload.hourly_units?.time === "iso8601" &&
+          payload._provenance?.provider === DATA_SOURCES.weather.name &&
+          payload._provenance?.documentation_url === DATA_SOURCES.weather.documentationUrl &&
+          payload._provenance?.dataset === "best_match numerical weather forecast" &&
+          Number.isFinite(new Date(payload._provenance?.served_at).valueOf()) &&
+          Number.isFinite(payload._provenance?.requested_coordinates?.latitude) &&
+          Number.isFinite(payload._provenance?.requested_coordinates?.longitude) &&
+          Math.abs(payload._provenance.requested_coordinates.latitude - lat) < 1e-9 &&
+          Math.abs(payload._provenance.requested_coordinates.longitude - lng) < 1e-9;
 
-        if (!hasValidHourlyRain) {
-          throw new Error("Weather service returned invalid precipitation data.");
+        if (!hasValidWeatherPayload) {
+          throw new Error("Weather service returned invalid or incompatible model data.");
         }
 
         if (requestId !== weatherRequestIdRef.current) return;
@@ -727,7 +1288,7 @@ export default function FloodMap() {
             ? previousWeather.hourly.time[previousSelectedHour]
             : payload.current.time;
         const nextForecastHour = findClosestTimeIndex(payload.hourly.time, selectedTime || payload.current.time);
-        const updatedAt = Date.now();
+        const updatedAt = new Date(payload._provenance.served_at).valueOf();
 
         forecastHourRef.current = nextForecastHour;
         weatherRef.current = payload;
@@ -738,16 +1299,16 @@ export default function FloodMap() {
         }
         setWeather(payload);
         setLastWeatherUpdatedAt(updatedAt);
-        setStatus(`Live weather synchronized at ${new Date(updatedAt).toLocaleTimeString([], {
+        setStatus(`Weather-model data synchronized at ${new Date(updatedAt).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit"
         })}.`);
       } catch (err) {
         if (requestId !== weatherRequestIdRef.current) return;
 
-        const message = (err as Error).message || "Failed to refresh live weather data.";
+        const message = (err as Error).message || "Failed to refresh weather-model data.";
         setWeatherError(message);
-        setStatus(weatherRef.current ? "Live weather refresh delayed; showing the latest available data." : message);
+        setStatus(weatherRef.current ? "Weather-model refresh delayed; showing the latest available data." : message);
       } finally {
         if (requestId === weatherRequestIdRef.current) {
           setIsWeatherRefreshing(false);
@@ -756,6 +1317,63 @@ export default function FloodMap() {
     },
     []
   );
+
+  const fetchOfficialRainfall = useCallback(async () => {
+    const requestId = ++officialRainfallRequestIdRef.current;
+    setIsOfficialRainfallRefreshing(true);
+    setOfficialRainfallError(null);
+
+    try {
+      const response = await fetch("/api/rainfall-observations", { cache: "no-store" });
+      const payload = (await response.json()) as OfficialRainfallResponse & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || `Official rainfall service returned ${response.status}`);
+      }
+
+      const hasValidStations =
+        Array.isArray(payload.stations) &&
+        payload.stations.length > 0 &&
+        payload.stations.every(
+          (station) =>
+            /^\d+$/.test(station.site_id) &&
+            typeof station.site_name === "string" &&
+            /\bAlbay\b/i.test(station.site_name) &&
+            (station.hourly_rain_mm === null ||
+              (Number.isFinite(station.hourly_rain_mm) && station.hourly_rain_mm >= 0)) &&
+            (station.elevation_m === null || (Number.isFinite(station.elevation_m) && station.elevation_m >= 0)) &&
+            (station.observed_at === null || Number.isFinite(new Date(station.observed_at).valueOf())) &&
+            ["current", "stale", "unavailable"].includes(station.freshness)
+        );
+      const hasValidPayload =
+        payload.provider === DATA_SOURCES.officialRainfall.name &&
+        payload.source_url === DATA_SOURCES.officialRainfall.endpoint &&
+        payload.station_scope === "Albay" &&
+        payload.period === "preceding hour" &&
+        payload.unit === "mm" &&
+        Number.isFinite(new Date(payload.retrieved_at).valueOf()) &&
+        Number.isFinite(payload.freshness_threshold_minutes) &&
+        payload.freshness_threshold_minutes > 0 &&
+        payload.freshness_threshold_minutes <= 180 &&
+        hasValidStations;
+
+      if (!hasValidPayload) {
+        throw new Error("Official rainfall service returned invalid or incompatible station data.");
+      }
+
+      if (requestId !== officialRainfallRequestIdRef.current) return;
+      setOfficialRainfall(payload);
+    } catch (observationError) {
+      if (requestId !== officialRainfallRequestIdRef.current) return;
+      setOfficialRainfallError(
+        (observationError as Error).message || "Failed to refresh official PAGASA rain-gauge observations."
+      );
+    } finally {
+      if (requestId === officialRainfallRequestIdRef.current) {
+        setIsOfficialRainfallRefreshing(false);
+      }
+    }
+  }, []);
 
   const initializeMap = useCallback((initialLocation: FocusLocation) => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -800,7 +1418,7 @@ export default function FloodMap() {
         });
       }
 
-      map.setTerrain({ source: "flood-terrain-dem", exaggeration: 1.45 });
+      map.setTerrain({ source: "flood-terrain-dem", exaggeration: 1 });
       map.setFog({
         range: [0.6, 9],
         color: "#dce9e4",
@@ -809,7 +1427,7 @@ export default function FloodMap() {
         "horizon-blend": 0.12
       });
 
-      map.addSource("user-risk-zone", {
+      map.addSource("rain-analysis-zone", {
         type: "geojson",
         data: toFeatureCollection() as FeatureCollection
       });
@@ -817,10 +1435,10 @@ export default function FloodMap() {
       map.addLayer({
         id: "zone-fill",
         type: "fill",
-        source: "user-risk-zone",
+        source: "rain-analysis-zone",
         slot: "middle",
         paint: {
-          "fill-color": ["get", "riskColor"],
+          "fill-color": RAIN_ANALYSIS_ZONE_COLOR,
           "fill-opacity": 0.28
         }
       });
@@ -828,10 +1446,10 @@ export default function FloodMap() {
       map.addLayer({
         id: "zone-outline",
         type: "line",
-        source: "user-risk-zone",
+        source: "rain-analysis-zone",
         slot: "middle",
         paint: {
-          "line-color": ["get", "riskColor"],
+          "line-color": RAIN_ANALYSIS_ZONE_COLOR,
           "line-width": 2
         }
       });
@@ -940,7 +1558,7 @@ export default function FloodMap() {
     if (!map || !analysis || !mapLoaded) return;
 
     const point: [number, number] = [location.lng, location.lat];
-    const riskSource = map.getSource("user-risk-zone") as mapboxgl.GeoJSONSource | undefined;
+    const zoneSource = map.getSource("rain-analysis-zone") as mapboxgl.GeoJSONSource | undefined;
     const hydroSource = map.getSource("water-network") as mapboxgl.GeoJSONSource | undefined;
     const barangaySource = map.getSource("albay-barangays") as mapboxgl.GeoJSONSource | undefined;
 
@@ -951,9 +1569,8 @@ export default function FloodMap() {
           ...analysis.polygon,
           properties: {
             radiusKm: analysis.radiusKm,
-            riskIndex: analysis.riskIndex,
-            riskColor: analysis.riskColor,
-            waterLiters: analysis.estimatedWaterLiters
+            modeledRainMm: analysis.precipWindowMm,
+            grossRainfallLiters: analysis.estimatedWaterLiters
           }
         },
         {
@@ -970,8 +1587,8 @@ export default function FloodMap() {
       ]
     };
 
-    if (riskSource) {
-      riskSource.setData(sourceData);
+    if (zoneSource) {
+      zoneSource.setData(sourceData);
     }
 
     if (hydroSource) {
@@ -999,14 +1616,19 @@ export default function FloodMap() {
       .setHTML(
         `<div class="district-forward-popup">
           <div><strong>Area:</strong> ${location.label}</div>
-          <div><strong>Flood risk:</strong> ${analysis.riskIndex}/100</div>
-          <div class="popup-detail"><strong>Rain accumulation:</strong> ${formatNumber(
+          <div><strong>Current model weather:</strong> ${weather ? getWeatherLabel(weather.current.weather_code) : "Unavailable"}</div>
+          <div><strong>Current model temperature:</strong> ${weather ? `${formatNumber(weather.current.temperature_2m, 1)} ${weather.current_units.temperature_2m}` : "Unavailable"}</div>
+          <div class="popup-detail"><strong>Modeled window rain:</strong> ${formatNumber(
             analysis.precipWindowMm,
             1
           )} ${weather?.current_units.precipitation ?? "mm"}</div>
-          <div class="popup-detail"><strong>Selected rain rate:</strong> ${formatNumber(analysis.selectedRainRateMmPerHour, 1)} mm/h</div>
-          <div class="popup-detail"><strong>Window:</strong> ${formatTime(weather?.hourly.time[analysis.windowStartHour] ?? "")} → ${formatTime(
-            weather?.hourly.time[analysis.windowEndHour] ?? ""
+          <div class="popup-detail"><strong>Avg selected rain rate:</strong> ${formatNumber(analysis.selectedRainRateMmPerHour, 1)} mm/h</div>
+          <div class="popup-detail"><strong>Selected 10 m wind:</strong> ${formatNumber(
+            analysis.selectedWindSpeedKph,
+            1
+          )} km/h from ${formatWindDirection(analysis.selectedWindDirectionDegrees)}</div>
+          <div class="popup-detail"><strong>Window:</strong> ${formatTime(analysis.windowStartTime)} → ${formatTime(
+            analysis.windowEndTime
           )}</div>
           <div class="popup-detail"><strong>Selected hour:</strong> ${formatTime(weather?.hourly.time[safeForecastHour] ?? "")}</div>
         </div>`
@@ -1034,6 +1656,10 @@ export default function FloodMap() {
     analysis,
     barangayData,
     formatTime,
+    getWeatherLabel,
+    weather?.current.weather_code,
+    weather?.current.temperature_2m,
+    weather?.current_units.temperature_2m,
     weather?.hourly.time,
     hydroData,
     location,
@@ -1085,10 +1711,7 @@ export default function FloodMap() {
           throw new Error(`Barangay boundary file returned ${response.status}`);
         }
 
-        const collection = (await response.json()) as BarangayFeatureCollection;
-        if (collection.type !== "FeatureCollection" || !Array.isArray(collection.features)) {
-          throw new Error("Barangay boundary file is invalid.");
-        }
+        const collection = validateAndNormalizeBarangayData(await response.json());
 
         setBarangayData(collection);
         setBarangayError(null);
@@ -1103,6 +1726,8 @@ export default function FloodMap() {
   }, []);
 
   useEffect(() => {
+    if (barangayData.features.length === 0) return;
+
     const focusKey = selectedAreaKey;
     if (weatherFocusKeyRef.current === focusKey) return;
 
@@ -1110,7 +1735,7 @@ export default function FloodMap() {
     weatherFocusKeyRef.current = focusKey;
     setStatus(`Updating rainfall and GIS data for ${location.label}...`);
     void fetchWeather(location.lat, location.lng, reason);
-  }, [fetchWeather, location, selectedAreaKey]);
+  }, [barangayData.features.length, fetchWeather, location, selectedAreaKey]);
 
   useEffect(() => {
     forecastHourRef.current = forecastHour;
@@ -1172,8 +1797,50 @@ export default function FloodMap() {
   }, [fetchWeather, location]);
 
   useEffect(() => {
-    initializeMap(ALBAY_PROVINCE_FOCUS);
-  }, [initializeMap]);
+    let lastRequestAt = 0;
+
+    const refreshOfficialRainfall = (minimumAgeMs = 0) => {
+      if (!navigator.onLine || Date.now() - lastRequestAt < minimumAgeMs) return;
+      lastRequestAt = Date.now();
+      void fetchOfficialRainfall();
+    };
+
+    refreshOfficialRainfall();
+    const refreshInterval = window.setInterval(
+      () => refreshOfficialRainfall(WEATHER_REFRESH_INTERVAL_MS - 1_000),
+      WEATHER_REFRESH_INTERVAL_MS
+    );
+    const handleFocus = () => refreshOfficialRainfall(WEATHER_FOCUS_REFRESH_MS);
+    const handleReconnect = () => refreshOfficialRainfall();
+
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleReconnect);
+
+    return () => {
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleReconnect);
+      officialRainfallRequestIdRef.current += 1;
+    };
+  }, [fetchOfficialRainfall]);
+
+  useEffect(() => {
+    if (barangayData.features.length === 0) return;
+    initializeMap(location);
+  }, [barangayData.features.length, initializeMap, location]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const resizeFrame = window.requestAnimationFrame(() => map.resize());
+    const resizeAfterTransition = window.setTimeout(() => map.resize(), 280);
+
+    return () => {
+      window.cancelAnimationFrame(resizeFrame);
+      window.clearTimeout(resizeAfterTransition);
+    };
+  }, [isReadingsPanelOpen, mapLoaded]);
 
   useEffect(() => {
     return () => {
@@ -1296,8 +1963,18 @@ export default function FloodMap() {
 
     const map = mapRef.current;
     const activeAnalysis = analysis;
-    const radiusRing = activeAnalysis?.polygon.geometry.coordinates[0];
-    if (!map || !mapLoaded || !activeAnalysis || !radiusRing?.length) {
+    const rainClipGeometries: Array<Polygon | MultiPolygon> = selectedAreaGeoJson
+      ? selectedAreaGeoJson.type === "FeatureCollection"
+        ? selectedAreaGeoJson.features.map((feature) => feature.geometry)
+        : [selectedAreaGeoJson.geometry]
+      : activeAnalysis
+        ? [activeAnalysis.polygon.geometry]
+        : [];
+    const rainClipRings = rainClipGeometries.flatMap((geometry) =>
+      geometry.type === "Polygon" ? geometry.coordinates : geometry.coordinates.flat()
+    );
+
+    if (!map || !mapLoaded || !activeAnalysis || rainClipRings.length === 0) {
       context.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
@@ -1306,6 +1983,9 @@ export default function FloodMap() {
     const measuredRainMm = Math.max(0, rainMm);
     const rainStrength = Math.min(1, measuredRainMm / 8);
     const baseFallSpeed = 90 + Math.min(measuredRainMm, 12) * 16;
+    const windSpeedKph = Math.max(0, activeAnalysis.selectedWindSpeedKph);
+    const downwindBearing = (activeAnalysis.selectedWindDirectionDegrees + 180) % 360;
+    const windPushPixelsPerSecond = Math.min(140, windSpeedKph * 2.25);
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let width = 0;
     let height = 0;
@@ -1313,30 +1993,146 @@ export default function FloodMap() {
     let animationFrame = 0;
     let previousTime = performance.now();
     let rainClipPath: Path2D | null = null;
+    let rainClipScreenRings: Array<Array<{ x: number; y: number }>> = [];
+    let rainClipBounds: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
+    let windVelocity = { x: 0, y: 0 };
 
-    const createParticle = (initial = false): RainParticle => ({
-      x: Math.random() * width,
-      y: initial ? Math.random() * height : -8 - Math.random() * 40,
-      radius: 0.8 + rainStrength * 1.1 + Math.random() * 0.9,
-      speed: baseFallSpeed * (0.82 + Math.random() * 0.36),
-      drift: -7 + Math.random() * 14,
-      opacity: 0.4 + Math.random() * 0.55
-    });
+    const updateWindVelocity = () => {
+      if (windPushPixelsPerSecond <= 0) {
+        windVelocity = { x: 0, y: 0 };
+        return;
+      }
 
-    const updateRainClipPath = () => {
-      const path = new Path2D();
+      const center = map.getCenter();
+      const downwindPoint = turf.destination(turf.point([center.lng, center.lat]), 1, downwindBearing, {
+        units: "kilometers"
+      });
+      const destination = downwindPoint.geometry.coordinates;
+      const originOnScreen = map.project([center.lng, center.lat]);
+      const destinationOnScreen = map.project(destination as [number, number]);
+      const vectorX = destinationOnScreen.x - originOnScreen.x;
+      const vectorY = destinationOnScreen.y - originOnScreen.y;
+      const vectorLength = Math.hypot(vectorX, vectorY);
 
-      radiusRing.forEach((coordinate, index) => {
-        const point = map.project(coordinate as [number, number]);
-        if (index === 0) {
-          path.moveTo(point.x, point.y);
-        } else {
-          path.lineTo(point.x, point.y);
+      windVelocity =
+        vectorLength > 0
+          ? {
+              x: (vectorX / vectorLength) * windPushPixelsPerSecond,
+              y: (vectorY / vectorLength) * windPushPixelsPerSecond
+            }
+          : { x: 0, y: 0 };
+    };
+
+    const isPointInRainClip = (x: number, y: number) => {
+      let inside = false;
+
+      rainClipScreenRings.forEach((ring) => {
+        for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index++) {
+          const current = ring[index];
+          const previous = ring[previousIndex];
+          const crossesRay =
+            current.y > y !== previous.y > y &&
+            x < ((previous.x - current.x) * (y - current.y)) / (previous.y - current.y) + current.x;
+
+          if (crossesRay) inside = !inside;
         }
       });
 
-      path.closePath();
+      return inside;
+    };
+
+    const getRandomPointInRainClip = () => {
+      const bounds = rainClipBounds;
+      if (!bounds) return { x: width / 2, y: height / 2 };
+
+      const boundsWidth = Math.max(1, bounds.maxX - bounds.minX);
+      const boundsHeight = Math.max(1, bounds.maxY - bounds.minY);
+
+      for (let attempt = 0; attempt < 160; attempt += 1) {
+        const x = bounds.minX + Math.random() * boundsWidth;
+        const y = bounds.minY + Math.random() * boundsHeight;
+        if (isPointInRainClip(x, y)) return { x, y };
+      }
+
+      // A projected boundary vertex is a safe visual fallback for unusually
+      // narrow polygons where random rejection sampling may miss the interior.
+      const fallback = rainClipScreenRings.find((ring) => ring.length > 0)?.[0];
+      return fallback ?? { x: width / 2, y: height / 2 };
+    };
+
+    const createParticle = (): RainParticle => {
+      const point = getRandomPointInRainClip();
+
+      return {
+        x: point.x,
+        y: point.y,
+        radius: 0.8 + rainStrength * 1.1 + Math.random() * 0.9,
+        speed: baseFallSpeed * (0.82 + Math.random() * 0.36),
+        windResponse: 0.82 + Math.random() * 0.36,
+        turbulence: -4 + Math.random() * 8,
+        opacity: 0.4 + Math.random() * 0.55
+      };
+    };
+
+    const updateRainClipPath = () => {
+      const path = new Path2D();
+      const screenRings: Array<Array<{ x: number; y: number }>> = [];
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      rainClipRings.forEach((ring) => {
+        const screenRing: Array<{ x: number; y: number }> = [];
+
+        ring.forEach((coordinate, index) => {
+          const point = map.project(coordinate as [number, number]);
+          screenRing.push({ x: point.x, y: point.y });
+          minX = Math.min(minX, point.x);
+          minY = Math.min(minY, point.y);
+          maxX = Math.max(maxX, point.x);
+          maxY = Math.max(maxY, point.y);
+
+          if (index === 0) {
+            path.moveTo(point.x, point.y);
+          } else {
+            path.lineTo(point.x, point.y);
+          }
+        });
+        path.closePath();
+        screenRings.push(screenRing);
+      });
+
       rainClipPath = path;
+      rainClipScreenRings = screenRings;
+      updateWindVelocity();
+
+      const visibleMinX = Math.max(0, minX);
+      const visibleMinY = Math.max(0, minY);
+      const visibleMaxX = Math.min(width, maxX);
+      const visibleMaxY = Math.min(height, maxY);
+      rainClipBounds =
+        Number.isFinite(visibleMinX) &&
+        Number.isFinite(visibleMinY) &&
+        visibleMaxX > visibleMinX &&
+        visibleMaxY > visibleMinY
+          ? { minX: visibleMinX, minY: visibleMinY, maxX: visibleMaxX, maxY: visibleMaxY }
+          : null;
+    };
+
+    const resetParticles = () => {
+      const bounds = rainClipBounds;
+      if (!bounds || measuredRainMm <= 0) {
+        particles = [];
+        return;
+      }
+
+      const clipPixelArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+      const areaScale = Math.max(0.65, Math.min(1.35, clipPixelArea / 160000));
+      // Positive modeled rain always gets a small visible minimum. Density,
+      // size, and fall speed still increase with the actual selected rate.
+      const count = Math.min(180, Math.max(12, Math.round(measuredRainMm * 40 * areaScale)));
+      particles = Array.from({ length: count }, createParticle);
     };
 
     const drawParticles = () => {
@@ -1344,7 +2140,7 @@ export default function FloodMap() {
       if (!rainClipPath) return;
 
       context.save();
-      context.clip(rainClipPath);
+      context.clip(rainClipPath, "evenodd");
       context.shadowColor = "rgba(38, 255, 124, 0.62)";
       context.shadowBlur = 5;
 
@@ -1370,12 +2166,7 @@ export default function FloodMap() {
       canvas.style.height = `${height}px`;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       updateRainClipPath();
-
-      const areaScale = Math.max(0.55, Math.min(1.35, (width * height) / 620000));
-      // The selected model rain rate directly controls particle density.
-      // Randomness is used only to distribute those data-driven particles naturally.
-      const count = measuredRainMm > 0 ? Math.min(180, Math.round(measuredRainMm * 40 * areaScale)) : 0;
-      particles = Array.from({ length: count }, () => createParticle(true));
+      resetParticles();
       drawParticles();
     };
 
@@ -1388,8 +2179,15 @@ export default function FloodMap() {
       if (reduceMotion) drawParticles();
     };
 
+    const handleMapTransformEnd = () => {
+      updateRainClipPath();
+      resetParticles();
+      drawParticles();
+    };
+
     map.on("move", handleMapTransform);
     map.on("resize", handleMapTransform);
+    map.on("moveend", handleMapTransformEnd);
 
     if (!layerVisibility.rainAnimation || measuredRainMm <= 0 || reduceMotion) {
       if (!layerVisibility.rainAnimation || measuredRainMm <= 0) {
@@ -1398,6 +2196,7 @@ export default function FloodMap() {
       return () => {
         map.off("move", handleMapTransform);
         map.off("resize", handleMapTransform);
+        map.off("moveend", handleMapTransformEnd);
         resizeObserver.disconnect();
         context.clearRect(0, 0, width, height);
       };
@@ -1408,10 +2207,19 @@ export default function FloodMap() {
       previousTime = time;
 
       particles.forEach((particle, index) => {
-        particle.y += particle.speed * elapsedSeconds;
-        particle.x += particle.drift * elapsedSeconds;
+        const windX = windVelocity.x * particle.windResponse + particle.turbulence;
+        const windY = windVelocity.y * particle.windResponse;
+        const verticalSpeed = Math.max(particle.speed * 0.35, particle.speed + windY);
+        particle.x += windX * elapsedSeconds;
+        particle.y += verticalSpeed * elapsedSeconds;
 
-        if (particle.y > height + 8 || particle.x < -8 || particle.x > width + 8) {
+        const bounds = rainClipBounds;
+        if (
+          !bounds ||
+          particle.y > bounds.maxY + 8 ||
+          particle.x < bounds.minX - 8 ||
+          particle.x > bounds.maxX + 8
+        ) {
           particles[index] = createParticle();
         }
       });
@@ -1426,21 +2234,24 @@ export default function FloodMap() {
       window.cancelAnimationFrame(animationFrame);
       map.off("move", handleMapTransform);
       map.off("resize", handleMapTransform);
+      map.off("moveend", handleMapTransformEnd);
       resizeObserver.disconnect();
       context.clearRect(0, 0, width, height);
     };
-  }, [analysis, layerVisibility.rainAnimation, mapLoaded]);
+  }, [analysis, layerVisibility.rainAnimation, mapLoaded, selectedAreaGeoJson]);
 
   useEffect(() => {
+    if (!selectedHydrologyBoundary || !selectedHydrologyBounds) return;
+
     hydrologyRequestIdRef.current += 1;
     setHydrologyStatus("idle");
     setHydroData(toFeatureCollection());
     const handle = window.setTimeout(() => {
-      fetchHydrology(location.lat, location.lng);
+      fetchHydrology();
     }, 500);
 
     return () => window.clearTimeout(handle);
-  }, [location, radiusKm, fetchHydrology]);
+  }, [fetchHydrology, selectedAreaKey, selectedHydrologyBoundary, selectedHydrologyBounds]);
 
   useEffect(() => {
     if (!isTimelinePlaying || !hasWeather) return;
@@ -1452,10 +2263,10 @@ export default function FloodMap() {
 
     const handle = window.setTimeout(() => {
       setForecastHour((hour) => Math.min(hour + 1, maxForecastHour));
-    }, 900);
+    }, TIMELINE_FRAME_INTERVAL_MS / timelinePlaybackSpeed);
 
     return () => window.clearTimeout(handle);
-  }, [hasWeather, isTimelinePlaying, maxForecastHour, safeForecastHour]);
+  }, [hasWeather, isTimelinePlaying, maxForecastHour, safeForecastHour, timelinePlaybackSpeed]);
 
   const selectedForecastTime = hasWeather ? weather!.hourly.time[safeForecastHour] : "";
   const firstTimelineTime = hasWeather ? weather!.hourly.time[0] : "";
@@ -1472,8 +2283,32 @@ export default function FloodMap() {
   const referenceNow = clockNow ?? lastWeatherUpdatedAt ?? 0;
   const weatherAgeMs = lastWeatherUpdatedAt ? Math.max(0, referenceNow - lastWeatherUpdatedAt) : null;
   const isWeatherStale = weatherAgeMs !== null && weatherAgeMs > WEATHER_STALE_AFTER_MS;
-  const latestError = error || weatherError || hydroError || barangayError;
+  const getOfficialGaugeState = (station: OfficialRainGaugeStation) => {
+    if (station.hourly_rain_mm === null || !station.observed_at) return "unavailable" as const;
+
+    const observedAt = new Date(station.observed_at).valueOf();
+    const thresholdMinutes = officialRainfall?.freshness_threshold_minutes ?? 60;
+    const ageMs = referenceNow - observedAt;
+    return Number.isFinite(observedAt) && ageMs >= -15 * 60_000 && ageMs <= thresholdMinutes * 60_000
+      ? "current" as const
+      : "stale" as const;
+  };
+  const featuredOfficialGauge = officialRainfall
+    ? [...officialRainfall.stations]
+        .filter((station) => station.hourly_rain_mm !== null && station.observed_at !== null)
+        .sort(
+          (a, b) => new Date(b.observed_at!).valueOf() - new Date(a.observed_at!).valueOf()
+        )[0] ?? officialRainfall.stations[0]
+    : null;
+  const featuredOfficialGaugeState = featuredOfficialGauge
+    ? getOfficialGaugeState(featuredOfficialGauge)
+    : "unavailable";
+  const latestError = error || weatherError || officialRainfallError || hydroError || barangayError;
   const currentRainIntervalMinutes = Math.max(1, Math.round((weather?.current.interval ?? 3600) / 60));
+  const selectedRainRateBasis =
+    selectedHourOffset === 0
+      ? `Equivalent hourly rate derived from the current ${currentRainIntervalMinutes}-minute modeled precipitation`
+      : "Average rate derived from Open-Meteo's preceding-hour precipitation total";
   const formatRelativeAge = (timestamp: number | null) => {
     if (!timestamp || !referenceNow) return "Waiting for first sync";
 
@@ -1503,25 +2338,25 @@ export default function FloodMap() {
         : isWeatherStale
           ? "Data stale"
           : weather
-            ? "Live model"
+          ? "Model data"
             : "Connecting";
   const nextSyncMinutes = lastWeatherUpdatedAt
     ? Math.max(0, Math.ceil((lastWeatherUpdatedAt + WEATHER_REFRESH_INTERVAL_MS - referenceNow) / 60_000))
     : null;
 
-  const loadingStage = !weather
-    ? 1
-    : !mapLoaded
-      ? 2
-      : hydrologyStatus === "idle" ||
-          hydrologyStatus === "loading" ||
-          (barangayData.features.length === 0 && !barangayError)
-        ? 3
-        : 4;
-  const loadingBlocked = Boolean((error || weatherError) && (!weather || !mapLoaded));
+  const loadingStage = barangayData.features.length === 0 && !barangayError
+    ? 0
+    : !weather
+      ? 1
+      : !mapLoaded
+        ? 2
+        : hydrologyStatus === "idle" || hydrologyStatus === "loading"
+          ? 3
+          : 4;
+  const loadingBlocked = Boolean((error || weatherError || barangayError) && (!weather || !mapLoaded));
   const isInitialLoading = !hasFinishedInitialLoad && !loadingBlocked;
   const activeLoadingStage = INITIAL_LOADING_STEPS[loadingStage] ?? READY_LOADING_STAGE;
-  const loadingProgress = [12, 38, 66, 90, 100][loadingStage];
+  const loadingProgress = Math.round((loadingStage / INITIAL_LOADING_STEPS.length) * 100);
 
   useEffect(() => {
     if (loadingStage !== INITIAL_LOADING_STEPS.length || hasFinishedInitialLoad) return;
@@ -1537,7 +2372,7 @@ export default function FloodMap() {
     <main className="district-forward-page">
       <section
         className="district-forward-shell"
-        aria-label="Flood-risk dashboard"
+        aria-label="Source-backed rainfall and hydrology dashboard"
         aria-busy={isInitialLoading}
       >
         {isInitialLoading ? (
@@ -1553,7 +2388,7 @@ export default function FloodMap() {
               </div>
 
               <div className="district-loading-message">
-                <p>Live flood intelligence</p>
+                <p>Source-backed rainfall data</p>
                 <h2>{activeLoadingStage.title}</h2>
                 <span>{activeLoadingStage.detail}</span>
               </div>
@@ -1598,7 +2433,9 @@ export default function FloodMap() {
                 <div>
                   <span>Albay coverage</span>
                   <h2 id="area-search-title">Find an area</h2>
-                  <p>Search 18 cities and municipalities or 720 barangays.</p>
+                  <p>
+                    Search {municipalityOptions.length} cities and municipalities or {barangayData.features.length} barangays.
+                  </p>
                 </div>
                 <button type="button" onClick={() => closeAreaPicker()} aria-label="Close area search">
                   ×
@@ -1718,6 +2555,35 @@ export default function FloodMap() {
             </h1>
             <small>Service Landings • GIS Flood Intelligence</small>
           </div>
+          <div className="district-forward-area-picker district-forward-header-area-picker">
+            <div className="area-picker-heading">
+              <span className="area-picker-heading-label">Area search</span>
+              <span>
+                {barangayData.features.length > 0
+                  ? `${barangayData.features.length} mapped`
+                  : barangayError
+                    ? "GIS unavailable"
+                    : "Loading GIS"}
+              </span>
+            </div>
+            <div className="area-picker-select-wrap">
+              <button
+                ref={areaPickerTriggerRef}
+                id="area-picker-trigger"
+                type="button"
+                className="area-picker-trigger"
+                onClick={openAreaPicker}
+                disabled={barangayData.features.length === 0}
+                aria-label={`Area search, current selection: ${areaPickerLabel}`}
+                aria-haspopup="dialog"
+                aria-expanded={isAreaPickerOpen}
+                aria-busy={barangayData.features.length === 0 && !barangayError}
+              >
+                <span>{areaPickerLabel}</span>
+                <span className="area-search-icon" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
           <div className="district-forward-header-actions">
             <div
               className={`live-data-status ${liveFeedState}`}
@@ -1746,48 +2612,74 @@ export default function FloodMap() {
           </div>
         </header>
 
-        <div className="district-forward-grid">
+        <div className={`district-forward-grid${isReadingsPanelOpen ? "" : " readings-collapsed"}`}>
           <aside className="district-forward-sidebar" aria-label="Controls and snapshot metrics">
             <p className="district-forward-eyebrow">Hydrology workspace</p>
-            <h2 className="district-forward-title">Flood conditions across Albay</h2>
+            <h2 className="district-forward-title">Selected-area model snapshot</h2>
             <p className="district-forward-lede">
-              Search any Albay city, municipality, or barangay to analyze rainfall, nearby waterways, and estimated flood conditions.
+              Numerical weather-model values for one representative point, not observations for the full selected area or an official flood warning.
             </p>
 
-            <div className="district-forward-matrix">
+            <div
+              className={`official-rain-observation ${featuredOfficialGaugeState}`}
+              aria-label="Latest official PAGASA rain-gauge observation in Albay"
+            >
+              <span>
+                PAGASA measured rain
+                {isOfficialRainfallRefreshing ? <em>Syncing</em> : null}
+              </span>
+              <strong>
+                {featuredOfficialGauge?.hourly_rain_mm !== null &&
+                featuredOfficialGauge?.hourly_rain_mm !== undefined
+                  ? `${formatNumber(featuredOfficialGauge.hourly_rain_mm, 1)} mm`
+                  : "Unavailable"}
+              </strong>
+              <small>
+                {featuredOfficialGauge
+                  ? `${featuredOfficialGauge.site_name} · ${
+                      featuredOfficialGauge.observed_at
+                        ? `preceding hour at ${formatTime(featuredOfficialGauge.observed_at)}`
+                        : "no observation time"
+                    } · ${featuredOfficialGaugeState}`
+                  : officialRainfallError || "Loading official Albay station observations…"}
+              </small>
+              <small>Station-specific measurement; not substituted into the area-wide model calculation.</small>
+            </div>
+
+            <div className="district-forward-matrix" aria-label={`Model-point snapshot for ${location.label}`}>
               <div className="district-forward-cell">
                 <strong>
                   {weather ? `${formatNumber(weather.current.precipitation)} ${weather.current_units.precipitation}` : "—"}
                 </strong>
-                <small>Current {currentRainIntervalMinutes}-min rain</small>
+                <small>Model rain / {currentRainIntervalMinutes} min</small>
               </div>
               <div className="district-forward-cell">
-                <strong>
+                <strong title={selectedRainRateBasis}>
                   {analysis ? `${formatNumber(analysis.selectedRainRateMmPerHour)} mm/h` : "—"}
                 </strong>
-                <small>Selected rain rate</small>
+                <small>Avg selected rain rate</small>
               </div>
               <div className="district-forward-cell">
                 <strong
                   className="metric-value"
-                  title={analysis ? `${formatNumber(analysis.estimatedWaterLiters, 0)} liters` : undefined}
+                  title={
+                    analysis
+                      ? `${formatNumber(analysis.estimatedWaterLiters, 0)} liters of gross modeled rainfall, assuming uniform rain across the circular zone`
+                      : undefined
+                  }
                   aria-label={analysis ? `${formatNumber(analysis.estimatedWaterLiters, 0)} liters` : undefined}
                 >
                   {analysis ? `${formatCompactNumber(analysis.estimatedWaterLiters)} L` : "—"}
                 </strong>
-                <small>Estimated water in zone</small>
+                <small>Gross rainfall volume</small>
               </div>
               <div className="district-forward-cell">
                 <strong>
-                  {analysis ? (
-                    <span className="risk-badge" style={{ backgroundColor: analysis.riskColor }}>
-                      {analysis.riskIndex}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
+                  {weather
+                    ? `${formatNumber(weather.current.temperature_2m, 1)} ${weather.current_units.temperature_2m}`
+                    : "—"}
                 </strong>
-                <small>Risk index (0-100)</small>
+                <small>Model temperature at 2 m</small>
               </div>
               <div className="district-forward-cell">
                 <strong
@@ -1797,49 +2689,16 @@ export default function FloodMap() {
                 >
                   {analysis ? `${formatCompactNumber(analysis.radiusAreaKm2)} km²` : "—"}
                 </strong>
-                <small>Catchment area</small>
+                <small>Circular analysis area</small>
               </div>
               <div className="district-forward-cell">
                 <strong>{weather ? getWeatherLabel(weather.current.weather_code) : "—"}</strong>
-                <small>Weather summary</small>
+                <small>Current model weather</small>
               </div>
             </div>
 
             <div className="district-forward-controlblock">
-              <h2>Simulation controls</h2>
-
-              <div className="district-forward-area-picker">
-                <div className="area-picker-heading">
-                  <span className="area-picker-heading-label">Area search</span>
-                  <span>
-                    {barangayData.features.length > 0
-                      ? `${barangayData.features.length} mapped`
-                      : barangayError
-                        ? "GIS unavailable"
-                        : "Loading GIS"}
-                  </span>
-                </div>
-                <div className="area-picker-select-wrap">
-                  <button
-                    ref={areaPickerTriggerRef}
-                    id="area-picker-trigger"
-                    type="button"
-                    className="area-picker-trigger"
-                    onClick={openAreaPicker}
-                    disabled={barangayData.features.length === 0}
-                    aria-haspopup="dialog"
-                    aria-expanded={isAreaPickerOpen}
-                    aria-describedby="area-picker-description"
-                    aria-busy={barangayData.features.length === 0 && !barangayError}
-                  >
-                    <span>{areaPickerLabel}</span>
-                    <span className="area-search-icon" aria-hidden="true" />
-                  </button>
-                </div>
-                <small id="area-picker-description" className="control-description">
-                  Search province-wide and synchronize the model to the selected boundary.
-                </small>
-              </div>
+              <h2>Analysis controls</h2>
 
               <div className="control-row">
                 <label className="control-label" htmlFor="radius-km">
@@ -1850,13 +2709,19 @@ export default function FloodMap() {
                   id="radius-km"
                   type="range"
                   min={0}
-                  max={20}
+                  max={radiusSliderMaxKm}
+                  step={1}
                   value={radiusKm}
-                  onChange={(event) => setRadiusKm(Number(event.target.value))}
+                  onChange={(event) => {
+                    radiusWasAdjustedRef.current = true;
+                    setRadiusKm(Number(event.target.value));
+                  }}
                   aria-describedby="radius-description"
                 />
                 <small id="radius-description" className="control-description">
-                  Start at the model focus point, then expand the circular catchment area.
+                  The default {provinceCoverageRadiusKm || "—"} km radius is calculated from the validated Albay boundary
+                  and covers the whole province from its focus point. Reduce it to inspect smaller circular areas; this is
+                  not a drainage catchment.
                 </small>
               </div>
 
@@ -1882,63 +2747,98 @@ export default function FloodMap() {
 
               <fieldset className="district-forward-layers">
                 <legend>Visible GIS layers</legend>
-                <div className="layer-options">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility.barangays}
-                      onChange={(event) =>
-                        setLayerVisibility((current) => ({ ...current, barangays: event.target.checked }))
-                      }
-                    />
-                    <span>Barangay boundaries</span>
-                    <strong>{barangayData.features.length || "—"}</strong>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility.rainZone}
-                      onChange={(event) =>
-                        setLayerVisibility((current) => ({ ...current, rainZone: event.target.checked }))
-                      }
-                    />
-                    <span>Rain accumulation zone</span>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility.rainAnimation}
-                      onChange={(event) =>
-                        setLayerVisibility((current) => ({ ...current, rainAnimation: event.target.checked }))
-                      }
-                    />
-                    <span>Live model rain dots</span>
-                    <strong>{analysis ? `${formatNumber(analysis.selectedRainRateMmPerHour)}mm/h` : "—"}</strong>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility.waterways}
-                      onChange={(event) =>
-                        setLayerVisibility((current) => ({ ...current, waterways: event.target.checked }))
-                      }
-                    />
-                    <span>River and stream lines</span>
-                    <strong>{hydroCounts.waterways}</strong>
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={layerVisibility.waterAreas}
-                      onChange={(event) =>
-                        setLayerVisibility((current) => ({ ...current, waterAreas: event.target.checked }))
-                      }
-                    />
-                    <span>Waterbody polygons</span>
-                    <strong>{hydroCounts.waterAreas}</strong>
-                  </label>
+                <div className="district-forward-layer-content">
+                  <div className="layer-options">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.barangays}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, barangays: event.target.checked }))
+                        }
+                      />
+                      <span>Barangay boundaries</span>
+                      <strong>{barangayData.features.length || "—"}</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.rainZone}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, rainZone: event.target.checked }))
+                        }
+                      />
+                      <span>Rain accumulation zone</span>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.rainAnimation}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, rainAnimation: event.target.checked }))
+                        }
+                      />
+                      <span>Rain-rate visualization</span>
+                      <strong>{analysis ? `${formatNumber(analysis.selectedRainRateMmPerHour)}mm/h` : "—"}</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.waterways}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, waterways: event.target.checked }))
+                        }
+                      />
+                      <span>Waterways & drainage</span>
+                      <strong>{hydrologyStatus === "ready" ? hydroCounts.waterways : "—"}</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.waterAreas}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, waterAreas: event.target.checked }))
+                        }
+                      />
+                      <span>Waterbody polygons</span>
+                      <strong>{hydrologyStatus === "ready" ? hydroCounts.waterAreas : "—"}</strong>
+                    </label>
+                  </div>
+                  <small className="control-description">
+                    Rain dots are an illustrative animation driven by the displayed model rate; individual dots are not measurements.
+                  </small>
+                  <small className="control-description">
+                    OpenStreetMap water features are selected by the complete {selectedAreaLevel.toLowerCase()} boundary,
+                    independently of the rainfall radius.
+                  </small>
+                  {hydrologyStatus === "ready" ? (
+                    <small className="control-description">
+                      {hydroCounts.rivers} river segments • {hydroCounts.streams} streams • {hydroCounts.canals} canals •{" "}
+                      {hydroCounts.drains + hydroCounts.ditches} drains/ditches
+                    </small>
+                  ) : null}
                 </div>
               </fieldset>
+
+              <p className="control-description data-source-note">
+                Sources:{" "}
+                <a href={DATA_SOURCES.weather.documentationUrl} target="_blank" rel="noreferrer">
+                  Open-Meteo model
+                </a>{" "}
+                •{" "}
+                <a href={DATA_SOURCES.officialRainfall.endpoint} target="_blank" rel="noreferrer">
+                  PAGASA gauges
+                </a>{" "}
+                •{" "}
+                <a href={DATA_SOURCES.administrativeNames.url} target="_blank" rel="noreferrer">
+                  PSA/NAMRIA boundaries
+                </a>{" "}
+                •{" "}
+                <a href={DATA_SOURCES.hydrology.copyrightUrl} target="_blank" rel="noreferrer">
+                  © OpenStreetMap contributors
+                </a>
+                . No official warning data.
+              </p>
 
             </div>
           </aside>
@@ -1948,7 +2848,7 @@ export default function FloodMap() {
               ref={mapContainerRef}
               id="map"
               role="application"
-              aria-label="Interactive 3D satellite map showing flood-risk analysis and water networks across Albay Province"
+              aria-label="Interactive 3D satellite map showing modeled rainfall and contextual water networks across Albay Province"
             />
             <canvas ref={rainCanvasRef} className="rain-particle-layer" aria-hidden="true" />
 
@@ -1968,48 +2868,48 @@ export default function FloodMap() {
                 <span className="mobile-legend-chevron" aria-hidden="true" />
               </button>
               <div id="map-legend-items" className="legend-items">
-                <span>
+                <span title="3D satellite terrain">
                   <span className="district-forward-dot terrain" aria-hidden="true" />
-                  3D satellite terrain
+                  3D terrain
                 </span>
-                <span className={layerVisibility.rainZone ? "" : "is-hidden"}>
+                <span className={layerVisibility.rainZone ? "" : "is-hidden"} title="Circular rain analysis zone">
                   <span
                     className="district-forward-dot"
-                    style={{ backgroundColor: analysis?.riskColor ?? "#94a3b8" }}
+                    style={{ backgroundColor: RAIN_ANALYSIS_ZONE_COLOR }}
                     aria-hidden="true"
                   />
-                  Rain accumulation / risk
+                  Rain zone
                 </span>
-                <span className={layerVisibility.barangays ? "" : "is-hidden"}>
+                <span className={layerVisibility.barangays ? "" : "is-hidden"} title="Barangay boundaries">
                   <span className="district-forward-dot barangay" aria-hidden="true" />
-                  Barangay boundaries
+                  Barangays
                 </span>
-                <span className={layerVisibility.rainAnimation ? "" : "is-hidden"}>
+                <span className={layerVisibility.rainAnimation ? "" : "is-hidden"} title="Illustrative animation driven by the modeled rain rate">
                   <span className="district-forward-dot rain" aria-hidden="true" />
-                  Live model rain dots
+                  Rain animation
                 </span>
-                <span className={layerVisibility.waterways ? "" : "is-hidden"}>
+                <span className={layerVisibility.waterways ? "" : "is-hidden"} title="Rivers and streams">
                   <span
                     className="district-forward-dot"
                     style={{ backgroundColor: "#3a5c84" }}
                     aria-hidden="true"
                   />
-                  Rivers and streams
+                  Rivers
                 </span>
-                <span className={layerVisibility.waterAreas ? "" : "is-hidden"}>
+                <span className={layerVisibility.waterAreas ? "" : "is-hidden"} title="Waterbody polygons">
                   <span
                     className="district-forward-dot water-area"
                     aria-hidden="true"
                   />
-                  Waterbody polygons
+                  Waterbodies
                 </span>
-                <span>
+                <span title="Model focus">
                   <span
                     className="district-forward-dot round"
                     style={{ backgroundColor: "#0d1112" }}
                     aria-hidden="true"
                   />
-                  Model focus
+                  Focus
                 </span>
               </div>
             </div>
@@ -2024,19 +2924,36 @@ export default function FloodMap() {
                   <span>{selectedHourPhase}</span>
                   <strong>{analysis ? `${formatNumber(analysis.precipWindowMm, 1)} mm / ${safeHours}h` : "—"}</strong>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isTimelinePlaying && safeForecastHour >= maxForecastHour) {
-                      setForecastHour(0);
+                <div className="timeline-actions">
+                  <select
+                    className="timeline-speed-select"
+                    value={timelinePlaybackSpeed}
+                    onChange={(event) =>
+                      setTimelinePlaybackSpeed(Number(event.target.value) as TimelinePlaybackSpeed)
                     }
-                    setIsTimelinePlaying((playing) => !playing);
-                  }}
-                  disabled={!hasWeather}
-                  aria-pressed={isTimelinePlaying}
-                >
-                  {isTimelinePlaying ? "Pause" : "Play"}
-                </button>
+                    disabled={!hasWeather}
+                    aria-label="Timeline playback speed"
+                    title="Timeline playback speed"
+                  >
+                    <option value={1}>1× speed</option>
+                    <option value={2}>2× speed</option>
+                    <option value={3}>3× speed</option>
+                    <option value={4}>4× speed</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isTimelinePlaying && safeForecastHour >= maxForecastHour) {
+                        setForecastHour(0);
+                      }
+                      setIsTimelinePlaying((playing) => !playing);
+                    }}
+                    disabled={!hasWeather}
+                    aria-pressed={isTimelinePlaying}
+                  >
+                    {isTimelinePlaying ? "Pause" : "Play"}
+                  </button>
+                </div>
               </div>
               <input
                 id="rain-timeline"
@@ -2059,37 +2976,170 @@ export default function FloodMap() {
             </div>
           </section>
 
-          <aside className="district-forward-right" aria-label="Live readings">
-            <h2>Readings</h2>
+          <aside
+            className={`district-forward-right${isReadingsPanelOpen ? " is-open" : " is-collapsed"}`}
+            aria-label="Model readings"
+          >
+            <button
+              type="button"
+              className="readings-rail-toggle"
+              aria-expanded={isReadingsPanelOpen}
+              aria-controls="readings-panel-content"
+              aria-label={isReadingsPanelOpen ? "Collapse readings panel" : "Expand readings panel"}
+              onClick={() => setIsReadingsPanelOpen((isOpen) => !isOpen)}
+            >
+              <span className="readings-toggle-arrow" aria-hidden="true">
+                {isReadingsPanelOpen ? "→" : "←"}
+              </span>
+              <span>{isReadingsPanelOpen ? "Hide" : "Readings"}</span>
+            </button>
+
+            <div
+              id="readings-panel-content"
+              className="readings-panel-content"
+              aria-hidden={!isReadingsPanelOpen}
+            >
+              <h2>Readings</h2>
 
             <div className="district-forward-meta">
               <div className="district-forward-meta-row">
-                <span>Accumulation window</span>
+                <span>Modeled accumulation window</span>
                 <span>
                   {analysis && weather
-                    ? `${formatTime(weather.hourly.time[analysis.windowStartHour])} → ${formatTime(
-                        weather.hourly.time[analysis.windowEndHour]
-                      )}`
+                    ? `${formatTime(analysis.windowStartTime)} → ${formatTime(analysis.windowEndTime)}`
                     : "—"}
                 </span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Selected forecast rain</span>
+                <span>Avg selected rain rate</span>
                 <span>
                   {analysis ? `${formatNumber(analysis.selectedRainRateMmPerHour)} mm/h` : "—"}
                 </span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Window total</span>
+                <span>Modeled window total</span>
                 <span>{analysis ? `${formatNumber(analysis.precipWindowMm, 1)} mm` : "—"}</span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Weather feed</span>
-                <span>Open-Meteo model • 5 min sync</span>
+                <span>Measured rainfall source</span>
+                <span>
+                  <a href={DATA_SOURCES.officialRainfall.endpoint} target="_blank" rel="noreferrer">
+                    DOST-PAGASA gauges
+                  </a>{" "}
+                  • preceding-hour station values
+                </span>
+              </div>
+              {officialRainfall?.stations.map((station) => {
+                const stationState = getOfficialGaugeState(station);
+                return (
+                  <div className="district-forward-meta-row" key={station.site_id}>
+                    <span>{station.site_name}</span>
+                    <span>
+                      {station.hourly_rain_mm === null
+                        ? "No reported rain value"
+                        : `${formatNumber(station.hourly_rain_mm, 1)} mm`}
+                      {station.observed_at ? ` • ${formatTime(station.observed_at)}` : ""}
+                      {` • ${stationState}`}
+                    </span>
+                  </div>
+                );
+              })}
+              {!officialRainfall ? (
+                <div className="district-forward-meta-row">
+                  <span>Albay gauge status</span>
+                  <span>
+                    {isOfficialRainfallRefreshing
+                      ? "Loading from PAGASA"
+                      : officialRainfallError || "Waiting"}
+                  </span>
+                </div>
+              ) : null}
+              <div className="district-forward-meta-row">
+                <span>Selected 10 m wind</span>
+                <span>
+                  {analysis
+                    ? `${formatNumber(analysis.selectedWindSpeedKph, 1)} km/h from ${formatWindDirection(
+                        analysis.selectedWindDirectionDegrees
+                      )}`
+                    : "—"}
+                </span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Barangay GIS</span>
-                <span>PSA / NAMRIA • {barangayData.features.length || 720} boundaries</span>
+                <span>Weather source</span>
+                <span>
+                  <a href={DATA_SOURCES.weather.documentationUrl} target="_blank" rel="noreferrer">
+                    Open-Meteo Forecast API
+                  </a>{" "}
+                  • best-match model
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Model data time</span>
+                <span>{weather ? formatTime(weather.current.time) : "—"}</span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Model grid point</span>
+                <span>{weather ? `${weather.latitude.toFixed(5)}, ${weather.longitude.toFixed(5)}` : "—"}</span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Boundary names / codes</span>
+                <span>
+                  <a href={DATA_SOURCES.administrativeNames.url} target="_blank" rel="noreferrer">
+                    PSA PSGC
+                  </a>{" "}
+                  • {DATA_SOURCES.administrativeNames.snapshot}
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Boundary geometry</span>
+                <span>
+                  <a href={DATA_SOURCES.administrativeGeometry.url} target="_blank" rel="noreferrer">
+                    NAMRIA-derived release
+                  </a>{" "}
+                  • {DATA_SOURCES.administrativeGeometry.snapshot}
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Verified Albay coverage</span>
+                <span>
+                  {barangayData.features.length > 0
+                    ? `${municipalityOptions.length} LGUs • ${barangayData.features.length} barangays`
+                    : "—"}{" "}
+                  • PSA {VERIFIED_ALBAY_COVERAGE.verifiedAsOf}
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Water-feature source</span>
+                <span>
+                  <a href={DATA_SOURCES.hydrology.copyrightUrl} target="_blank" rel="noreferrer">
+                    © OpenStreetMap contributors
+                  </a>{" "}
+                  • volunteered context
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Water-feature coverage</span>
+                <span>
+                  {hydrologyStatus === "ready"
+                    ? `${hydroCounts.rivers} rivers • ${hydroCounts.streams} streams • ${hydroCounts.canals} canals • ${hydroCounts.drains + hydroCounts.ditches} drains/ditches • ${hydroCounts.waterAreas} waterbodies`
+                    : "—"}
+                </span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>OSM dataset timestamp</span>
+                <span>{hydrologyDatasetUpdatedAt ? formatRelativeAge(hydrologyDatasetUpdatedAt) : "—"}</span>
+              </div>
+              <div className="district-forward-meta-row">
+                <span>Water-feature retrieval</span>
+                <span>
+                  {hydrologyStatus === "ready"
+                    ? formatRelativeAge(hydrologyRetrievedAt)
+                    : hydrologyStatus === "loading"
+                      ? "Loading from OpenStreetMap"
+                      : hydrologyStatus === "error"
+                        ? "Unavailable"
+                        : "Waiting"}
+                </span>
               </div>
               <div className="district-forward-meta-row">
                 <span>Last synchronized</span>
@@ -2116,20 +3166,28 @@ export default function FloodMap() {
                 <span>{status}</span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Coordinates</span>
+                <span>Derived focus point</span>
                 <span>{`${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`}</span>
               </div>
               <div className="district-forward-meta-row">
-                <span>Elevation</span>
+                <span>Model-point elevation</span>
                 <span>{weather ? `${formatNumber(weather.elevation, 0)} m` : "—"}</span>
               </div>
               <div className="district-forward-meta-row">
                 <span>Latest error</span>
                 <span>{latestError || "None"}</span>
               </div>
+              <div className="district-forward-meta-row">
+                <span>Official warnings</span>
+                <span>
+                  Not provided here •{" "}
+                  <a href={DATA_SOURCES.officialGuidance.url} target="_blank" rel="noreferrer">
+                    check PAGASA
+                  </a>
+                </span>
+              </div>
+              </div>
             </div>
-
-            
           </aside>
         </div>
       </section>

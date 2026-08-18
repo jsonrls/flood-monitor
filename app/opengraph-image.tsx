@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { ImageResponse } from "next/og";
 
-export const alt = "Albay Province live rain and flood intelligence map";
+export const alt = "Albay Province weather-model rainfall and GIS source map";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -39,7 +39,7 @@ export default async function OpenGraphImage() {
             <div style={{ display: "flex", flexDirection: "column" }}>
               <div style={{ fontSize: "31px", fontWeight: 800, letterSpacing: "-1px" }}>Flood Monitor</div>
               <div style={{ color: "#596267", fontSize: "15px", letterSpacing: "3px", textTransform: "uppercase" }}>
-                GIS flood intelligence
+                Source-backed GIS context
               </div>
             </div>
           </div>
@@ -58,7 +58,7 @@ export default async function OpenGraphImage() {
             }}
           >
             <span style={{ background: "#20c779", borderRadius: "50%", display: "flex", height: "12px", width: "12px" }} />
-            Live Albay model
+            Current model data
           </div>
         </div>
 
@@ -77,10 +77,10 @@ export default async function OpenGraphImage() {
                 maxWidth: "650px"
               }}
             >
-              Flood conditions across Albay Province.
+              Rainfall context across Albay Province.
             </div>
             <div style={{ color: "#40484c", fontSize: "22px", lineHeight: 1.4, marginTop: "22px", maxWidth: "650px" }}>
-              Near-real-time rainfall, local risk estimates, 3D satellite terrain, and nearby Albay river networks in one civic map.
+              Weather-model rainfall, verified administrative coverage, 3D satellite terrain, and OpenStreetMap water features in one civic map.
             </div>
           </div>
 
@@ -146,8 +146,8 @@ export default async function OpenGraphImage() {
             textTransform: "uppercase"
           }}
         >
-          <span>18 LGUs • 720 barangays • Bicol Region</span>
-          <span>Open-Meteo • Mapbox • GIS</span>
+          <span>PSA-verified: 18 LGUs • 720 barangays</span>
+          <span>Open-Meteo • PSA/NAMRIA • OpenStreetMap • Mapbox</span>
         </div>
       </div>
     ),

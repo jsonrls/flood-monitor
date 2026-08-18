@@ -2,10 +2,10 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Albay Flood Monitor | Live Rain & GIS Intelligence",
+    name: "Albay Flood Monitor | Model Rain & GIS Sources",
     short_name: "Flood Monitor",
     description:
-      "Near-real-time rainfall, flood-risk estimates, 3D terrain, and waterways across Albay Province.",
+      "Source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and waterways across Albay Province.",
     start_url: "/",
     display: "standalone",
     background_color: "#eef0ed",

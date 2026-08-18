@@ -11,18 +11,18 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   applicationName: "Flood Monitor",
   title: {
-    default: "Albay Flood Monitor | Live Rain & GIS Intelligence",
+    default: "Albay Flood Monitor | Model Rain & GIS Sources",
     template: "%s | Flood Monitor"
   },
   description:
-    "Explore near-real-time rainfall, flood-risk estimates, 3D terrain, and waterways across every city, municipality, and barangay in Albay Province.",
+    "Explore traceable weather-model rainfall, 3D terrain, verified administrative boundaries, and OpenStreetMap waterways across Albay Province.",
   keywords: [
     "flood monitor",
     "Albay flood map",
     "Legazpi flood map",
-    "Albay flood risk",
+    "Albay rainfall model",
     "rainfall map",
-    "flood risk",
+    "weather model",
     "GIS",
     "Mapbox",
     "weather map",
@@ -40,15 +40,15 @@ export const metadata: Metadata = {
     locale: "en_PH",
     url: "/",
     siteName: "Flood Monitor",
-    title: "Albay Flood Monitor | Live Rain & GIS Intelligence",
+    title: "Albay Flood Monitor | Model Rain & GIS Sources",
     description:
-      "Explore near-real-time rainfall, flood-risk estimates, 3D terrain, and waterways across Albay Province."
+      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and waterways across Albay Province."
   },
   twitter: {
     card: "summary_large_image",
-    title: "Albay Flood Monitor | Live Rain & GIS Intelligence",
+    title: "Albay Flood Monitor | Model Rain & GIS Sources",
     description:
-      "Explore near-real-time rainfall, flood-risk estimates, 3D terrain, and waterways across Albay Province."
+      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and waterways across Albay Province."
   },
   robots: {
     index: true,

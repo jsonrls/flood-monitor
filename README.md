@@ -1,37 +1,42 @@
 # Albay Flood Monitor
 
-Albay Flood Monitor is a responsive flood-intelligence dashboard for Albay, Philippines. It combines administrative boundaries, weather-model precipitation, nearby waterways, terrain, and a configurable circular analysis zone to help users explore possible rain-driven flood conditions at province, city/municipality, and barangay level.
+Albay Flood Monitor is a responsive rainfall and GIS context dashboard for Albay, Philippines. It combines official PAGASA rain-gauge observations, numerical weather-model output, administrative boundaries, volunteered nearby-water features, terrain, and a configurable circular analysis zone.
 
-The dashboard is an exploratory decision-support tool. Its risk score and water-volume estimate are heuristic outputs, not official forecasts, warnings, hydrologic simulations, or evacuation guidance.
+Every displayed data value is either returned by a named provider or transparently calculated from those provider values. The app does not generate a flood-risk score, use mock fallbacks, or present animated rain particles as observations. It is not an official forecast, warning, hydrologic simulation, or evacuation-guidance service.
 
 ## Key features
 
-- Searchable coverage of Albay Province, all 18 cities and municipalities, and 720 barangays.
+- Searchable coverage of Albay Province, all 18 cities/municipalities, and 720 barangays, validated against the official PSA count.
 - Diacritic-insensitive place search with keyboard navigation.
 - Administrative-boundary highlighting for the selected province, municipality/city, or barangay.
 - Viewport-aware map navigation constrained to a padded Albay boundary on desktop and smaller devices.
 - Mapbox satellite terrain with 3D relief and an area-focused camera.
 - Open-Meteo current conditions and hourly precipitation data.
-- A configurable analysis radius from 0 to 20 km, starting at the model focus point.
+- Current, station-specific hourly rain observations from DOST-PAGASA gauges in Albay, with source timestamps and stale/unavailable states.
+- A geometry-derived 56 km default analysis radius that covers the complete validated Albay boundary from the province focus point, adjustable from 0 to 60 km.
 - Rain-accumulation windows from 1 to 48 hours.
-- A playable forecast timeline spanning the weather data returned by the provider.
-- Nearby rivers, streams, canals, drains, ditches, riverbanks, and water polygons from OpenStreetMap through the Overpass API.
+- A playable forecast timeline spanning the weather data returned by the provider, with selectable 1×–4× playback speed.
+- Nearby rivers, streams, canals, drains, ditches, riverbanks, reservoirs, basins, and simple or multipolygon waterbodies from OpenStreetMap.
 - A rain-animation layer whose intensity follows the selected hourly rain rate.
 - Toggleable boundary, accumulation-zone, rain, waterway, and waterbody layers.
-- Automatic weather refresh, stale-data indicators, and limited offline continuity.
+- Automatic weather refresh, provider timestamps, stale-data indicators, and limited offline continuity.
+- Visible source, vintage, and limitation labels for weather, boundaries, waterways, and official PAGASA guidance.
+- A collapsible desktop readings rail that returns its width to the map while keeping an edge-mounted restore control.
+- Runtime validation of weather provenance and every boundary feature before data are displayed.
 - Responsive layouts for desktop, tablet, mobile portrait, and short landscape screens.
 - No browser geolocation request; the app starts with Albay Province selected.
 
 ## How the dashboard works
 
-Selecting an area highlights its administrative boundary and derives a representative point inside that boundary. The point drives the weather request, nearby-water search, map focus, and circular risk-zone calculation.
+Selecting an area highlights its administrative boundary and derives a representative point inside that boundary. The point drives the weather request, map focus, and circular rain-analysis calculation. Hydrology uses the complete selected administrative boundary instead of the point or analysis radius.
 
 ```mermaid
 flowchart LR
     A[Area selection] --> B[Representative focus point]
-    B --> C[Open-Meteo weather]
-    B --> D[OpenStreetMap waterways]
-    B --> E[Turf analysis zone]
+    B --> C[Open-Meteo weather model]
+    H[PAGASA Albay gauges] --> F
+    A --> D[Boundary-filtered OpenStreetMap waterways]
+    B --> E[Turf calculations]
     C --> E
     D --> F[Interactive map layers]
     E --> F
@@ -49,8 +54,9 @@ For a province or municipality, the analysis represents the configured circular 
 | Mapping | Mapbox GL JS 3 | Satellite map, terrain, sources, layers, popups, and controls |
 | Geospatial analysis | Turf 7 | Representative points, circular zones, area calculations, and geometry operations |
 | Weather | Open-Meteo Forecast API | Current conditions and hourly precipitation |
-| Hydrology context | OpenStreetMap Overpass API | Nearby waterways and water polygons |
-| Boundary data | PSA PSGC and NAMRIA-derived GeoJSON | Albay province, municipality, and barangay coverage |
+| Observed rainfall | DOST-PAGASA Automated Rain Gauges | Station-specific preceding-hour measurements |
+| Hydrology context | OpenStreetMap API and Overpass API | Validated nearby waterways and waterbody polygons |
+| Boundary data | PSA PSGC names/codes and NAMRIA-derived GeoJSON | Validated Albay province, municipality, and barangay coverage |
 | Styling | Global CSS | Responsive layouts, loading states, dialogs, and map overlays |
 
 ## Requirements
@@ -58,7 +64,7 @@ For a province or municipality, the analysis represents the configured circular 
 - Node.js 18.17 or newer.
 - npm.
 - A public Mapbox access token.
-- Network access to Mapbox, Open-Meteo, and the OpenStreetMap Overpass API.
+- Network access to Mapbox, Open-Meteo, DOST-PAGASA, OpenStreetMap, and the Overpass API.
 
 ## Local setup
 
@@ -107,6 +113,7 @@ The app falls back to `http://localhost:3000` for metadata when neither site URL
 | Command | Description |
 | --- | --- |
 | `npm run dev` | Start the Next.js development server. |
+| `npm run validate:data` | Verify the boundary artifact hash, provenance, geometry, codes, and official Albay coverage. |
 | `npm run build` | Create an optimized production build and run Next.js build-time checks. |
 | `npm run start` | Serve the completed production build. |
 | `npm run lint` | Start Next.js's ESLint setup; the repository does not yet include an ESLint configuration. |
@@ -127,7 +134,7 @@ Changing the area updates the highlighted boundary, representative focus point, 
 
 ### Configure the analysis
 
-- **Analysis radius:** starts at 0 km for the model focus point and expands the circular catchment-style zone up to 20 km.
+- **Analysis radius:** defaults to 56 km, calculated by rounding up the farthest boundary distance from the validated Albay province focus point. The 0–60 km slider can reduce or slightly expand this circular calculation zone. It is not a drainage catchment.
 - **Rain accumulation window:** sums precipitation over the selected trailing period from 1 to 48 hours.
 - **Timeline:** chooses the forecast hour used as the end of the accumulation window.
 - **Play:** advances the selected forecast hour automatically.
@@ -138,10 +145,12 @@ Changing the area updates the highlighted boundary, representative focus point, 
 The layer controls show or hide:
 
 - Barangay boundaries.
-- Rain-accumulation and risk zone.
+- Circular rain-analysis zone.
 - Animated rain dots.
 - Rivers and streams.
 - Waterbody polygons.
+
+When a barangay is selected, the rain-rate animation is clipped to its complete boundary, including multi-part geometries. Particle locations, density, size, and motion are illustrative; only the displayed millimeter-per-hour and wind values come from the weather provider. Province and municipality views use the circular analysis zone.
 
 On compact screens, the legend collapses so the map and controls remain usable without covering most of the viewport.
 
@@ -149,15 +158,23 @@ On compact screens, the legend collapses so the map and controls remain usable w
 
 ### Rain accumulation
 
-The app sums available hourly precipitation values over the selected trailing window. When the selected hour is the current weather interval, the current precipitation value is normalized to millimeters per hour using the interval supplied by Open-Meteo.
+Open-Meteo defines hourly precipitation as the total for the preceding hour. The app sums those hourly totals over the selected trailing window and displays the true coverage start one hour before the first included timestamp. For the current selection, the provider's current interval precipitation—normally a preceding 15-minute modeled total—is normalized to an equivalent average rate in millimeters per hour.
+
+These values are weather-model outputs, not rain-gauge measurements. Fifteen-minute data in regions without native high-resolution model coverage may be interpolated from hourly data.
+
+### Official station observations
+
+The measured-rain card and PAGASA station rows come from the public [DOST-PAGASA Latest Automated Rain Gauges](https://bagong.pagasa.dost.gov.ph/automated-rain-gauge) table. The server extracts only rows whose published station name identifies Albay; it does not contain a hardcoded rainfall value or synthesize a replacement when PAGASA reports `-`.
+
+Each observation retains its PAGASA site ID, station name, elevation, preceding-hour rainfall, and Philippine-time observation timestamp. A numeric observation more than 60 minutes old is labeled stale. A missing value stays unavailable. These sparse, point-based gauge readings are shown as an independent ground check and are never substituted into the selected barangay, municipality, or circular-zone model calculations.
 
 ### Analysis area
 
-Turf creates an 80-step circle around the selected focus point. The displayed catchment area is the geodesic area of this polygon, converted from square meters to square kilometers.
+Turf creates an 80-step circle around the selected focus point. The displayed circular analysis area is the geodesic area of this polygon, converted from square meters to square kilometers. It is not a surveyed hydrologic catchment.
 
-At the default 0 km radius, the catchment area and estimated water volume are zero while point-based weather and rain-risk readings remain available.
+At the default 0 km radius, the analysis area and calculated gross rainfall volume are mathematically zero while point-based weather readings remain available.
 
-### Estimated water in zone
+### Gross rainfall volume
 
 The estimated volume assumes the accumulated rain falls uniformly across the analysis zone:
 
@@ -167,31 +184,13 @@ estimated water (liters) = analysis area (m²) × accumulated rain (mm)
 
 This works because 1 mm of rain over 1 m² equals 1 liter of water. The number is gross rainfall volume only; it does not account for infiltration, drainage capacity, evaporation, soil saturation, surface roughness, buildings, pumps, tides, river discharge, or upstream flow.
 
-### Risk index
-
-The 0–100 risk index combines:
-
-- Average hourly precipitation over the selected window.
-- Rain intensity at the selected forecast hour.
-- Total accumulated precipitation.
-- A modest low-elevation penalty from the weather model's reported elevation.
-
-The map uses these display bands:
-
-| Score | Color | Dashboard interpretation |
-| --- | --- | --- |
-| 0–29 | Green | Lower modeled rain-driven risk |
-| 30–49 | Amber | Elevated modeled risk |
-| 50–69 | Orange | High modeled risk |
-| 70–100 | Red | Very high modeled risk |
-
-These bands are application heuristics. They are not PAGASA rainfall-warning thresholds and must not be interpreted as official hazard classifications.
-
 ## Data sources and attribution
 
 ### Administrative boundaries
 
 Barangay and municipality names follow the [Philippine Statistics Authority PSGC register](https://psa.gov.ph/classification/psgc/). The bundled Albay GeoJSON is derived from PSA/NAMRIA administrative-boundary data and simplified for web mapping through the [Barangay Boundaries Repository](https://github.com/bendlikeabamboo/barangay-boundaries-repository), release `v2026.4.13.0`.
+
+The [official PSA Albay entry](https://psa.gov.ph/classification/psgc/citimuni/0500500000) was cross-checked against the current PSGC publication as of 30 June 2026. It confirms 3 cities, 15 municipalities, and 720 barangays. This current count check does not change the disclosed vintage of the bundled names or geometry.
 
 Bundled dataset metadata:
 
@@ -200,23 +199,27 @@ Bundled dataset metadata:
 - NAMRIA boundary version: `2023-11-06`.
 - Feature count: 720 barangays.
 
-Each feature in `public/albay-barangays.geojson` includes properties shaped like this:
+Each feature in `public/albay-barangays.geojson` includes source properties. This is an actual Baclayon record, not placeholder data:
 
 ```json
 {
-  "code": "PSGC barangay code",
-  "name": "Barangay name",
-  "areaSqKm": 0,
-  "municipalityCode": "PSGC city or municipality code",
-  "municipalityName": "City or municipality name",
+  "code": "0500501001",
+  "name": "Baclayon",
+  "areaSqKm": 1.29169119012,
+  "municipalityCode": "0500501000",
+  "municipalityName": "Bacacay",
   "provinceCode": "05005",
   "provinceName": "Albay"
 }
 ```
 
+The app validates all 720 unique barangay codes, geometry types, required properties, province codes, metadata, and the 18-LGU grouping before displaying the dataset. Displayed boundary areas are recalculated geodesically from the bundled visible geometry with Turf rather than trusting the pre-simplification `areaSqKm` property.
+
+The unused legacy `public/legazpi-barangays.geojson` extract is also covered by the audit: its 70 features must exactly match the corresponding PSGC codes, names, areas, and geometries in the validated province dataset.
+
 ### Weather
 
-The server route at `GET /api/weather` proxies the [Open-Meteo Forecast API](https://open-meteo.com/en/docs). It requests current temperature, current precipitation, weather code, and hourly precipitation with two past days and three forecast days in the location's automatically selected timezone.
+The server route at `GET /api/weather` proxies the [Open-Meteo Forecast API](https://open-meteo.com/en/docs). Open-Meteo combines output from national weather-service models and selects a best-match model for the coordinate. The route requests current temperature, precipitation, WMO weather code, 10 m wind, and hourly values with two past days and three forecast days in the location's automatically selected timezone. Millimeters, kilometers per hour, ISO 8601 local timestamps, best-match model selection, and land-cell selection are requested explicitly.
 
 Example request:
 
@@ -224,11 +227,19 @@ Example request:
 curl "http://localhost:3000/api/weather?latitude=13.15079&longitude=123.72841"
 ```
 
-Weather responses are cached for five minutes and may be served stale for an additional minute while revalidation occurs. The client refreshes periodically, refreshes when the selected area changes or connectivity returns, and labels old observations as stale.
+The server rejects incomplete provider payloads and adds a `_provenance` object naming the provider, documentation URL, dataset type, route-served time, and requested coordinates. The browser independently validates arrays, units, timestamps, coordinate metadata, and provenance before display. Responses are cached for five minutes and may be served stale for one additional minute while revalidation occurs. Old model data are labeled stale.
+
+### Official rain gauges
+
+`GET /api/rainfall-observations` retrieves PAGASA's current automated-rain-gauge publication on the server, validates its table structure and values, converts Philippine local timestamps to explicit `+08:00` ISO timestamps, and returns only Albay stations. The upstream result is cached for two minutes. If PAGASA is unavailable or changes the table incompatibly, the route does not fabricate a replacement; every retained value still carries its source observation time and becomes visibly stale.
 
 ### Waterways and waterbodies
 
-The browser sends a location-and-radius query to the [OpenStreetMap Overpass API](https://overpass-api.de/) for nearby waterways and natural-water features. These layers provide geographic context only. Completeness and geometry accuracy depend on current OpenStreetMap coverage and Overpass availability.
+The browser calls the local `GET /api/hydrology` route with the selected administrative level and PSA code. The server resolves that code only against the bundled, validated Albay boundary dataset, queries the selected boundary's complete bounding box, and retains every returned feature that spatially intersects the province, municipality, or barangay boundary. Hydrology is therefore independent of the rainfall-analysis circle: selecting Albay Province requests all mapped Albay water features, while a municipality or barangay selection requests that whole administrative area. One Overpass query contains flowing waterways, simple waterbody ways, and multipolygon waterbody relations, keeping every successful response category-complete. It tries the documented main, VK Maps, and Private.coffee global instances; if no provider supplies a complete validated response, the route returns an error instead of silently shrinking the selected area or fabricating data.
+
+The converter joins relation-member segments into closed outer and inner rings, assigns holes to their containing outer polygon, and returns valid GeoJSON `LineString`, `Polygon`, or `MultiPolygon` features. Supported flowing-water tags are river, stream, canal, drain, ditch, and tidal channel. Supported waterbody tags include `natural=water`, riverbanks, reservoirs, and basins. Returned features retain their OpenStreetMap object type, ID, version, last-edit timestamp, and direct source URL. The server rejects unrecognized source attribution, malformed object metadata or geometry, future timestamps, and Overpass snapshots more than six hours behind the live database. The browser independently validates identity, version, edit time, feature/geometry class, counts, selected scope/code/bounds, spatial intersection, allowed upstream host, response age, and the server's source-validation result before Mapbox receives the data.
+
+These volunteered layers provide geographic context only; they are not official hydrology, flood extents, drainage capacity, or evidence that a feature is currently flowing. Counts represent OSM way/relation features intersecting the selected boundary, not a count of uniquely named river systems. Completeness and geometry accuracy depend on OpenStreetMap coverage and upstream availability. Data attribution is [© OpenStreetMap contributors, ODbL](https://www.openstreetmap.org/copyright).
 
 ### Basemap and terrain
 
@@ -240,6 +251,8 @@ Mapbox provides the standard satellite basemap, terrain elevation tiles, and map
 flood-map/
 ├── app/
 │   ├── api/weather/route.ts     # Validated and cached Open-Meteo proxy
+│   ├── api/rainfall-observations/route.ts # Validated PAGASA gauge proxy
+│   ├── api/hydrology/route.ts   # Validated OSM retrieval and availability routing
 │   ├── globals.css              # Application and responsive styling
 │   ├── layout.tsx               # Metadata, viewport, and global layout
 │   ├── manifest.ts              # Web-app manifest
@@ -249,9 +262,15 @@ flood-map/
 ├── components/
 │   ├── FloodLoadingIcon.tsx     # Loading-stage icon
 │   └── FloodMap.tsx             # Map, controls, search, data, and analysis
+├── lib/
+│   ├── dataSources.ts            # Provider URLs, vintages, and verified coverage
+│   ├── osmHydrology.ts            # OSM normalization and GeoJSON relation conversion
+│   └── pagasaRainfall.ts         # PAGASA table parser, validation, and freshness rules
 ├── public/
 │   ├── albay-barangays.geojson  # Province-wide administrative boundaries
 │   └── logo.svg                 # Public application logo
+├── scripts/
+│   └── validate-data.mjs        # Deterministic boundary integrity audit
 ├── declarations.d.ts            # Module and asset declarations
 ├── next.config.js               # Next.js configuration
 ├── package.json                 # Scripts and dependencies
@@ -264,9 +283,10 @@ flood-map/
 2. The selected boundary is reduced to a representative focus point.
 3. The client calls `/api/weather` with that point's latitude and longitude.
 4. The server validates the coordinates and requests Open-Meteo data.
-5. The client queries Overpass for water features near the same point.
-6. Turf builds the analysis polygon and calculates its area.
-7. React derives rain, volume, and risk metrics and updates Mapbox sources and layers.
+5. Independently, the server retrieves current Albay station observations from PAGASA.
+6. The client calls `/api/hydrology` with the selected administrative scope/code; the server retrieves, normalizes, validates, and boundary-filters OpenStreetMap water features.
+7. Turf builds the analysis polygon and calculates its area.
+8. React derives transparent model totals, circular area, and gross rainfall volume, while keeping PAGASA measurements visibly separate.
 
 ## API behavior
 
@@ -279,15 +299,19 @@ flood-map/
 
 Possible responses:
 
-- `200`: Open-Meteo response body.
+- `200`: validated Open-Meteo response plus `_provenance` metadata.
 - `400`: Missing or invalid coordinates.
 - `502`: Weather provider request failed or returned an unusable response.
 
-Successful responses include cache headers and an `X-Weather-Source: open-meteo` header.
+Successful responses include cache headers, `X-Weather-Source: Open-Meteo Forecast API`, and `X-Data-Provenance` headers.
+
+`GET /api/rainfall-observations` takes no parameters. A successful response contains validated Albay station observations and `X-Rainfall-Source: DOST-PAGASA Automated Rain Gauges`; an upstream, parsing, or validation failure returns `502`.
+
+`GET /api/hydrology` requires `scope=province|municipality|barangay` and the matching Albay PSA `code`. A successful response contains boundary-filtered GeoJSON, per-class feature counts, the selected scope/code and trusted boundary provenance, source hosts, query bounds, OSM dataset timestamp, freshness validation, and completeness states for waterway lines, simple waterbodies, and relation waterbodies. Shared HTTP caches reuse a response for ten minutes. The browser also persists up to six selected-area responses for six hours and skips a network request when a complete entry is under ten minutes old. Invalid or non-Albay selections return `400`; complete upstream failure returns `502` without reducing the selected area.
 
 ## Responsive and accessibility behavior
 
-- Large screens use a multi-column dashboard with controls, map, and readings.
+- Large screens use a multi-column dashboard with a collapsible readings rail.
 - Tablet and portrait mobile layouts stack the interface into one column.
 - Short landscape mobile screens use a compact two-column arrangement.
 - The area picker becomes a full-screen dialog on narrow devices.
@@ -298,14 +322,16 @@ Successful responses include cache headers and an `X-Weather-Source: open-meteo`
 
 ## Loading, caching, and offline behavior
 
-The initial overlay reports progress for area data, weather, 3D map setup, and GIS layers. Weather has explicit loading, live, stale, offline, and error states.
+The initial overlay reports progress for area data, weather, 3D map setup, and GIS layers. Weather has explicit loading, current-model, stale, offline, and error states.
 
 - The server caches weather responses for 300 seconds.
+- The server caches PAGASA gauge responses for 120 seconds; the client refreshes them every five minutes and on reconnection.
 - The client schedules a weather refresh every five minutes.
 - Data older than twelve minutes is considered stale.
 - Previously loaded weather can remain visible during a temporary network outage.
-- Hydrology requests are debounced after location or radius changes.
-- Overpass timeouts or rate limits can temporarily leave water layers unavailable without preventing the rest of the dashboard from working.
+- Hydrology requests are debounced only after administrative-area changes; rainfall radius changes do not reload them.
+- Hydrology responses use a ten-minute browser/shared HTTP cache. The client also keeps the six most recent exact province/municipality/barangay responses in local storage. A validated response under ten minutes old renders immediately and skips the request; an older response can remain visible for up to six hours while a background refresh runs. Cached data must pass the same identity, geometry, selected-area provenance, boundary-intersection, and snapshot-age validation as a network response, and invalid or expired entries are deleted.
+- A single selected-boundary query, three documented Overpass providers, strict freshness checks, and no silent area reduction prevent an overloaded or stale mirror from being presented as complete current data.
 
 The app does not provide a complete offline map or offline-first installation because its basemap, terrain, weather, and hydrology layers depend on third-party network services.
 
@@ -313,8 +339,9 @@ The app does not provide a complete offline map or offline-first installation be
 
 - The app does not request browser geolocation.
 - There is no account system, user profile, or persistent application database.
+- The browser stores up to six validated hydrology responses locally to speed up repeat visits; these entries contain public OSM geometry and the selected focus coordinates and expire automatically.
 - Selecting an area sends its representative coordinates to the local weather route, which forwards them to Open-Meteo.
-- The browser sends the focus coordinates and search radius to the public Overpass endpoint.
+- The browser sends the focus coordinates and bounded hydrology radius only to the local route; the server contacts OpenStreetMap/Overpass.
 - Mapbox receives normal browser requests required to load its map style and terrain tiles.
 
 Review the policies and operational requirements of these providers before using the application in a production or regulated environment.
@@ -327,7 +354,7 @@ Review the policies and operational requirements of these providers before using
 - Elevation is a coarse model input and is not a parcel-level ground survey.
 - Administrative boundaries are simplified for web display.
 - Water-feature availability depends on volunteered OpenStreetMap data.
-- Weather forecasts and observations can change, be delayed, or be unavailable.
+- Weather-model outputs can change, be delayed, be interpolated, or be unavailable.
 - The dashboard does not include river gauges, tide levels, dam releases, storm surge, soil moisture, drainage capacity, or official hazard maps.
 
 For real-world safety decisions, follow PAGASA bulletins and instructions from Albay provincial, city/municipal, barangay, and disaster-risk-reduction authorities.
@@ -368,7 +395,7 @@ Open `/api/weather` with valid coordinates and inspect the response. A `400` ind
 
 ### Waterways take a long time to appear
 
-Overpass is a shared public service and may be busy or rate limited. Reduce the analysis radius, wait briefly, and retry by changing the selected area or radius.
+Open `/api/hydrology?scope=province&code=05005` and inspect its selected-area provenance, source-validation, counts, and completeness fields. Province queries are larger than municipality or barangay queries and can take several seconds on public Overpass infrastructure. Changing the selected area starts a debounced request for that complete boundary; changing the rainfall radius does not reload or filter hydrology.
 
 ### Area search has no results
 
@@ -380,13 +407,14 @@ Test both portrait and landscape orientation, close the full-screen area picker,
 
 ## Validation and testing
 
-At minimum, run the production build before submitting changes:
+Run the deterministic data-integrity audit and production build before submitting changes:
 
 ```bash
+npm run validate:data
 npm run build
 ```
 
-There is currently no automated test suite or committed ESLint configuration. The production build still performs TypeScript and Next.js build-time checks. A useful manual smoke test covers:
+`validate:data` verifies the committed boundary file SHA-256, provenance metadata, all required properties and geometry types, unique PSGC codes, positive calculated areas, and the official Albay 3-city/15-municipality/720-barangay coverage. There is currently no browser test suite or committed ESLint configuration. The production build still performs TypeScript and Next.js build-time checks. A useful manual smoke test covers:
 
 - Province, municipality, and barangay search and selection.
 - Keyboard navigation and dialog dismissal.
@@ -403,7 +431,7 @@ Keep changes focused and preserve the distinction between modeled indicators and
 
 1. Install dependencies with `npm install`.
 2. Make the change in a dedicated branch.
-3. Run `npm run build`.
+3. Run `npm run validate:data` and `npm run build`.
 4. Complete the relevant manual smoke tests.
 5. Document new environment variables, third-party services, calculations, or data-source changes here.
 
