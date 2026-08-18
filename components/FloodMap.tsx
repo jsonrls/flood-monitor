@@ -120,6 +120,10 @@ const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const WEATHER_FOCUS_REFRESH_MS = 2 * 60 * 1000;
 const WEATHER_STALE_AFTER_MS = 12 * 60 * 1000;
 const ALBAY_PROVINCE_CODE = "05005";
+// A generous margin keeps Albay's outer islands visible in the pitched 3D view
+// while still preventing users from navigating far away from the province.
+const ALBAY_MAP_BOUNDS_PADDING_RATIO = 0.3;
+const ALBAY_VIEWPORT_FOOTPRINT_ALLOWANCE = 1.15;
 const ALBAY_PROVINCE_FOCUS: FocusLocation = {
   lat: 13.1775,
   lng: 123.528,
@@ -244,7 +248,7 @@ export default function FloodMap() {
   const [lastWeatherUpdatedAt, setLastWeatherUpdatedAt] = useState<number | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const [clockNow, setClockNow] = useState<number | null>(null);
-  const [radiusKm, setRadiusKm] = useState(8);
+  const [radiusKm, setRadiusKm] = useState(0);
   const [hoursWindow, setHoursWindow] = useState(24);
   const [forecastHour, setForecastHour] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
@@ -275,6 +279,10 @@ export default function FloodMap() {
     () => [...barangayData.features].sort((a, b) => barangayNameCollator.compare(a.properties.name, b.properties.name)),
     [barangayData]
   );
+  const albayProvinceBounds = useMemo<[number, number, number, number] | null>(() => {
+    if (barangayData.features.length === 0) return null;
+    return turf.bbox(barangayData) as [number, number, number, number];
+  }, [barangayData]);
   const municipalityOptions = useMemo<MunicipalitySummary[]>(() => {
     const municipalityMap = new Map<string, MunicipalitySummary>();
 
@@ -773,6 +781,7 @@ export default function FloodMap() {
       zoom: 11,
       pitch: 58,
       bearing: -18,
+      projection: "mercator",
       maxPitch: 80,
       antialias: true
     });
@@ -1182,6 +1191,40 @@ export default function FloodMap() {
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !mapLoaded || !albayProvinceBounds) return;
+
+    const applyResponsiveAlbayBounds = () => {
+      const [west, south, east, north] = albayProvinceBounds;
+      const provinceWidth = east - west;
+      const provinceHeight = north - south;
+      const container = map.getContainer();
+      const viewportAspect = Math.min(3, Math.max(0.5, container.clientWidth / Math.max(1, container.clientHeight)));
+      const paddedWidth = provinceWidth * (1 + ALBAY_MAP_BOUNDS_PADDING_RATIO * 2);
+      const paddedHeight = provinceHeight * (1 + ALBAY_MAP_BOUNDS_PADDING_RATIO * 2);
+      const viewportWidth = provinceHeight * viewportAspect * ALBAY_VIEWPORT_FOOTPRINT_ALLOWANCE;
+      const viewportHeight = (provinceWidth / viewportAspect) * ALBAY_VIEWPORT_FOOTPRINT_ALLOWANCE;
+      const boundaryWidth = Math.max(paddedWidth, viewportWidth);
+      const boundaryHeight = Math.max(paddedHeight, viewportHeight);
+      const centerLongitude = (west + east) / 2;
+      const centerLatitude = (south + north) / 2;
+      const responsiveBounds: mapboxgl.LngLatBoundsLike = [
+        [centerLongitude - boundaryWidth / 2, centerLatitude - boundaryHeight / 2],
+        [centerLongitude + boundaryWidth / 2, centerLatitude + boundaryHeight / 2]
+      ];
+
+      map.setMaxBounds(responsiveBounds);
+    };
+
+    applyResponsiveAlbayBounds();
+    map.on("resize", applyResponsiveAlbayBounds);
+
+    return () => {
+      map.off("resize", applyResponsiveAlbayBounds);
+    };
+  }, [albayProvinceBounds, mapLoaded]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
     const source = map.getSource("albay-barangays") as mapboxgl.GeoJSONSource | undefined;
@@ -1462,7 +1505,6 @@ export default function FloodMap() {
           : weather
             ? "Live model"
             : "Connecting";
-  const dashboardStatusLabel = error || hydroError || barangayError ? "Data warning" : liveFeedLabel;
   const nextSyncMinutes = lastWeatherUpdatedAt
     ? Math.max(0, Math.ceil((lastWeatherUpdatedAt + WEATHER_REFRESH_INTERVAL_MS - referenceNow) / 60_000))
     : null;
@@ -1807,14 +1849,14 @@ export default function FloodMap() {
                 <input
                   id="radius-km"
                   type="range"
-                  min={1}
+                  min={0}
                   max={20}
                   value={radiusKm}
                   onChange={(event) => setRadiusKm(Number(event.target.value))}
                   aria-describedby="radius-description"
                 />
                 <small id="radius-description" className="control-description">
-                  Radius of circular catchment area.
+                  Start at the model focus point, then expand the circular catchment area.
                 </small>
               </div>
 
@@ -1898,16 +1940,6 @@ export default function FloodMap() {
                 </div>
               </fieldset>
 
-              <div className="district-forward-risk">
-                <span>Status: </span>
-                <span
-                  className={`status-chip ${latestError ? "warn" : liveFeedState}`}
-                  role="status"
-                  aria-live="polite"
-                >
-                  {mapLoaded ? dashboardStatusLabel : "Loading"}
-                </span>
-              </div>
             </div>
           </aside>
 

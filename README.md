@@ -9,9 +9,10 @@ The dashboard is an exploratory decision-support tool. Its risk score and water-
 - Searchable coverage of Albay Province, all 18 cities and municipalities, and 720 barangays.
 - Diacritic-insensitive place search with keyboard navigation.
 - Administrative-boundary highlighting for the selected province, municipality/city, or barangay.
+- Viewport-aware map navigation constrained to a padded Albay boundary on desktop and smaller devices.
 - Mapbox satellite terrain with 3D relief and an area-focused camera.
 - Open-Meteo current conditions and hourly precipitation data.
-- A configurable analysis radius from 1 to 20 km.
+- A configurable analysis radius from 0 to 20 km, starting at the model focus point.
 - Rain-accumulation windows from 1 to 48 hours.
 - A playable forecast timeline spanning the weather data returned by the provider.
 - Nearby rivers, streams, canals, drains, ditches, riverbanks, and water polygons from OpenStreetMap through the Overpass API.
@@ -126,7 +127,7 @@ Changing the area updates the highlighted boundary, representative focus point, 
 
 ### Configure the analysis
 
-- **Analysis radius:** sets the radius of the circular catchment-style zone from 1 to 20 km.
+- **Analysis radius:** starts at 0 km for the model focus point and expands the circular catchment-style zone up to 20 km.
 - **Rain accumulation window:** sums precipitation over the selected trailing period from 1 to 48 hours.
 - **Timeline:** chooses the forecast hour used as the end of the accumulation window.
 - **Play:** advances the selected forecast hour automatically.
@@ -153,6 +154,8 @@ The app sums available hourly precipitation values over the selected trailing wi
 ### Analysis area
 
 Turf creates an 80-step circle around the selected focus point. The displayed catchment area is the geodesic area of this polygon, converted from square meters to square kilometers.
+
+At the default 0 km radius, the catchment area and estimated water volume are zero while point-based weather and rain-risk readings remain available.
 
 ### Estimated water in zone
 
