@@ -65,7 +65,7 @@ export default async function OpenGraphImage() {
         <div style={{ display: "flex", flex: 1, gap: "48px", paddingTop: "36px" }}>
           <div style={{ display: "flex", flex: 1, flexDirection: "column", justifyContent: "center" }}>
             <div style={{ color: "#596267", fontSize: "16px", letterSpacing: "3px", textTransform: "uppercase" }}>
-              Rain • terrain • waterways
+              Rain • terrain • traffic
             </div>
             <div
               style={{
@@ -80,7 +80,7 @@ export default async function OpenGraphImage() {
               Rainfall context across Albay Province.
             </div>
             <div style={{ color: "#40484c", fontSize: "22px", lineHeight: 1.4, marginTop: "22px", maxWidth: "650px" }}>
-              Weather-model rainfall, verified administrative coverage, 3D satellite terrain, and OpenStreetMap water features in one civic map.
+              Weather-model rainfall, verified administrative coverage, 3D satellite terrain, and live road traffic in one civic map.
             </div>
           </div>
 

@@ -30,16 +30,6 @@ export const DATA_SOURCES = {
     release: "v2026.4.13.0",
     url: "https://github.com/bendlikeabamboo/barangay-boundaries-repository/releases/tag/v2026.4.13.0"
   },
-  hydrology: {
-    name: "OpenStreetMap contributors",
-    overpassEndpoints: [
-      "https://overpass-api.de/api/interpreter",
-      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-      "https://overpass.private.coffee/api/interpreter"
-    ],
-    copyrightUrl: "https://www.openstreetmap.org/copyright",
-    description: "Current volunteered OSM water features returned by documented global Overpass instances"
-  },
   basemap: {
     name: "Mapbox Standard Satellite and Terrain DEM",
     documentationUrl: "https://docs.mapbox.com/mapbox-gl-js/guides/"

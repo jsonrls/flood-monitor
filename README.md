@@ -1,6 +1,6 @@
 # Albay Flood Monitor
 
-Albay Flood Monitor is a responsive rainfall and GIS context dashboard for Albay, Philippines. It combines official PAGASA rain-gauge observations, numerical weather-model output, administrative boundaries, volunteered nearby-water features, terrain, and a configurable circular analysis zone.
+Albay Flood Monitor is a responsive rainfall and GIS context dashboard for Albay, Philippines. It combines official PAGASA rain-gauge observations, numerical weather-model output, administrative boundaries, volunteered nearby-water features, terrain, and a boundary-clipped land-area analysis zone.
 
 Every displayed data value is either returned by a named provider or transparently calculated from those provider values. The app does not generate a flood-risk score, use mock fallbacks, or present animated rain particles as observations. It is not an official forecast, warning, hydrologic simulation, or evacuation-guidance service.
 
@@ -13,22 +13,22 @@ Every displayed data value is either returned by a named provider or transparent
 - Mapbox satellite terrain with 3D relief and an area-focused camera.
 - Open-Meteo current conditions and hourly precipitation data.
 - Current, station-specific hourly rain observations from DOST-PAGASA gauges in Albay, with source timestamps and stale/unavailable states.
-- A geometry-derived 56 km default analysis radius that covers the complete validated Albay boundary from the province focus point, adjustable from 0 to 60 km.
+- Boundary-derived land-area coverage for Albay Province and every selected city, municipality, or barangay.
 - Rain-accumulation windows from 1 to 48 hours.
 - A playable forecast timeline spanning the weather data returned by the provider, with selectable 1×–4× playback speed.
 - Nearby rivers, streams, canals, drains, ditches, riverbanks, reservoirs, basins, and simple or multipolygon waterbodies from OpenStreetMap.
 - A rain-animation layer whose intensity follows the selected hourly rain rate.
-- Toggleable boundary, accumulation-zone, rain, waterway, and waterbody layers.
+- Toggleable accumulation-zone, rain, waterway, and waterbody layers.
 - Automatic weather refresh, provider timestamps, stale-data indicators, and limited offline continuity.
 - Visible source, vintage, and limitation labels for weather, boundaries, waterways, and official PAGASA guidance.
 - A collapsible desktop readings rail that returns its width to the map while keeping an edge-mounted restore control.
 - Runtime validation of weather provenance and every boundary feature before data are displayed.
 - Responsive layouts for desktop, tablet, mobile portrait, and short landscape screens.
-- No browser geolocation request; the app starts with Albay Province selected.
+- On-demand, high-accuracy device location for flood reports, with fresh-fix checks, visible uncertainty, and manual pin correction.
 
 ## How the dashboard works
 
-Selecting an area highlights its administrative boundary and derives a representative point inside that boundary. The point drives the weather request, map focus, and circular rain-analysis calculation. Hydrology uses the complete selected administrative boundary instead of the point or analysis radius.
+Selecting an area highlights its administrative boundary and derives a representative point inside that boundary. The point drives the weather request and map focus. Turf dissolves the selected barangay geometries into one authoritative land boundary used by the rain zone, animation clipping, area calculation, gross rainfall volume, and hydrology filtering.
 
 ```mermaid
 flowchart LR
@@ -36,14 +36,14 @@ flowchart LR
     B --> C[Open-Meteo weather model]
     H[PAGASA Albay gauges] --> F
     A --> D[Boundary-filtered OpenStreetMap waterways]
-    B --> E[Turf calculations]
+    A --> E[Turf boundary and area calculations]
     C --> E
     D --> F[Interactive map layers]
     E --> F
     F --> G[Metrics, popup, and timeline]
 ```
 
-For a province or municipality, the analysis represents the configured circular zone around the derived focus point. It does not claim that a single weather reading describes every location inside the full administrative boundary.
+For every administrative level, the displayed rainfall is a representative-point model value applied uniformly to the complete selected land boundary. It does not claim that one weather-model grid point measures conditions at every location inside that boundary.
 
 ## Technology stack
 
@@ -52,7 +52,7 @@ For a province or municipality, the analysis represents the configured circular 
 | Application | Next.js 14 App Router | UI, metadata, manifest, and weather proxy route |
 | Interface | React 18 and TypeScript | Interactive dashboard state and typed components |
 | Mapping | Mapbox GL JS 3 | Satellite map, terrain, sources, layers, popups, and controls |
-| Geospatial analysis | Turf 7 | Representative points, circular zones, area calculations, and geometry operations |
+| Geospatial analysis | Turf 7 | Representative points, dissolved land boundaries, area calculations, and geometry operations |
 | Weather | Open-Meteo Forecast API | Current conditions and hourly precipitation |
 | Observed rainfall | DOST-PAGASA Automated Rain Gauges | Station-specific preceding-hour measurements |
 | Hydrology context | OpenStreetMap API and Overpass API | Validated nearby waterways and waterbody polygons |
@@ -64,6 +64,7 @@ For a province or municipality, the analysis represents the configured circular 
 - Node.js 18.17 or newer.
 - npm.
 - A public Mapbox access token.
+- A Firebase project with a registered Web app, Cloud Firestore, and Anonymous Authentication enabled.
 - Network access to Mapbox, Open-Meteo, DOST-PAGASA, OpenStreetMap, and the Overpass API.
 
 ## Local setup
@@ -86,17 +87,29 @@ For a province or municipality, the analysis represents the configured circular 
    ```dotenv
    NEXT_PUBLIC_MAPBOX_TOKEN=pk_your_public_mapbox_token
    NEXT_PUBLIC_SITE_URL=http://localhost:3000
+   NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_web_api_key
+   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+   NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
+   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+   NEXT_PUBLIC_FIREBASE_APP_ID=your_web_app_id
    ```
 
    `NEXT_PUBLIC_MAPBOX_TOKEN` is required. `NEXT_PUBLIC_SITE_URL` is optional locally and is used for absolute metadata URLs. Because variables prefixed with `NEXT_PUBLIC_` are included in browser code, use a public Mapbox token and restrict its allowed URLs in your Mapbox account.
 
-4. Start the development server.
+4. Enable end-user account creation in **Firebase Console → Authentication → Settings → User actions**, then deploy Anonymous Authentication and the Firestore rules from this repository while signed into an account that can administer the Firebase project.
+
+   ```bash
+   npx firebase-tools deploy --only auth,firestore:rules --project your-project-id
+   ```
+
+5. Start the development server.
 
    ```bash
    npm run dev
    ```
 
-5. Open [http://localhost:3000](http://localhost:3000).
+6. Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment variables
 
@@ -104,6 +117,12 @@ For a province or municipality, the analysis represents the configured circular 
 | --- | --- | --- |
 | `NEXT_PUBLIC_MAPBOX_TOKEN` | Yes | Public Mapbox token used by Mapbox GL JS in the browser. |
 | `NEXT_PUBLIC_SITE_URL` | No | Canonical application origin used by Next.js metadata, for example `https://flood.example.org`. |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | For reporting | Public Firebase Web API key. |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | For reporting | Firebase Authentication domain. |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | For reporting | Firebase project ID used by Firestore. |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | For reporting | Firebase Web app storage bucket value. |
+| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | For reporting | Firebase Cloud Messaging sender ID from the Web app configuration. |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | For reporting | Firebase Web app identifier. |
 | `VERCEL_PROJECT_PRODUCTION_URL` | Automatic on Vercel | Used as the metadata origin when `NEXT_PUBLIC_SITE_URL` is absent. |
 
 The app falls back to `http://localhost:3000` for metadata when neither site URL variable is available.
@@ -120,6 +139,12 @@ The app falls back to `http://localhost:3000` for metadata when neither site URL
 
 ## Using the application
 
+### Report flooding
+
+Select **Report flood** on the map to begin. The app requests device location only at that point; it never requests location during ordinary map browsing. It ignores cached readings and briefly watches for improving GPS fixes instead of accepting the first coarse result. The map shows the device-reported accuracy radius and exact accuracy estimate; retry GPS or adjust the pin when the reading is imprecise. If access is denied, unavailable, or still less accurate than 250 meters, place the report manually by tapping the map. Choose a water depth and vehicle-access level, then submit.
+
+Community reports are stored in Cloud Firestore and shown on the map for 24 hours. Submission uses Firebase Anonymous Authentication, so no visible account setup is required. Deploy the included `firestore.rules` before accepting reports; the rules allow public reads, permit only validated anonymous creates, and deny client updates or deletes.
+
 ### Select an area
 
 Open the area picker and search for Albay Province, a city or municipality, or a barangay. Matching ignores letter case and diacritical marks. The result list is capped at 100 items to keep the picker responsive.
@@ -134,23 +159,25 @@ Changing the area updates the highlighted boundary, representative focus point, 
 
 ### Configure the analysis
 
-- **Analysis radius:** defaults to 56 km, calculated by rounding up the farthest boundary distance from the validated Albay province focus point. The 0–60 km slider can reduce or slightly expand this circular calculation zone. It is not a drainage catchment.
+- **Rainfall coverage:** uses the complete land boundary of the selected province, city/municipality, or barangay. The boundary determines the animation clip, land area, and gross rainfall volume.
 - **Rain accumulation window:** sums precipitation over the selected trailing period from 1 to 48 hours.
 - **Timeline:** chooses the forecast hour used as the end of the accumulation window.
 - **Play:** advances the selected forecast hour automatically.
 - **Reset view:** restores the map camera to the currently selected area.
+
+On compact screens, the Analysis Controls container can be collapsed from its header and the map expands into the released space. The controls remain open on larger screens. Map-interpretation caveats and current hydrology counts are available from the PAGASA exclamation dialog.
 
 ### Control GIS layers
 
 The layer controls show or hide:
 
 - Barangay boundaries.
-- Circular rain-analysis zone.
+- Entire Albay Province land perimeter, drawn as one solid red cartographic outline with no interior fill or barangay seams; barangay selection does not change this outline.
 - Animated rain dots.
 - Rivers and streams.
 - Waterbody polygons.
 
-When a barangay is selected, the rain-rate animation is clipped to its complete boundary, including multi-part geometries. Particle locations, density, size, and motion are illustrative; only the displayed millimeter-per-hour and wind values come from the weather provider. Province and municipality views use the circular analysis zone.
+The rain-rate animation is clipped to the complete selected boundary at every administrative level, including multi-part geometries and holes. Particle locations, density, size, and motion are illustrative; only the displayed millimeter-per-hour and wind values come from the weather provider.
 
 On compact screens, the legend collapses so the map and controls remain usable without covering most of the viewport.
 
@@ -166,20 +193,18 @@ These values are weather-model outputs, not rain-gauge measurements. Fifteen-min
 
 The measured-rain card and PAGASA station rows come from the public [DOST-PAGASA Latest Automated Rain Gauges](https://bagong.pagasa.dost.gov.ph/automated-rain-gauge) table. The server extracts only rows whose published station name identifies Albay; it does not contain a hardcoded rainfall value or synthesize a replacement when PAGASA reports `-`.
 
-Each observation retains its PAGASA site ID, station name, elevation, preceding-hour rainfall, and Philippine-time observation timestamp. A numeric observation more than 60 minutes old is labeled stale. A missing value stays unavailable. These sparse, point-based gauge readings are shown as an independent ground check and are never substituted into the selected barangay, municipality, or circular-zone model calculations.
+Each observation retains its PAGASA site ID, station name, elevation, preceding-hour rainfall, and Philippine-time observation timestamp. A numeric observation more than 60 minutes old is labeled stale. A missing value stays unavailable. These sparse, point-based gauge readings are shown as an independent ground check and are never substituted into the selected boundary model calculations.
 
-### Analysis area
+### Selected land area
 
-Turf creates an 80-step circle around the selected focus point. The displayed circular analysis area is the geodesic area of this polygon, converted from square meters to square kilometers. It is not a surveyed hydrologic catchment.
-
-At the default 0 km radius, the analysis area and calculated gross rainfall volume are mathematically zero while point-based weather readings remain available.
+Turf dissolves the administrative polygons for the current selection and calculates the geodesic area of the resulting `Polygon` or `MultiPolygon`. The displayed square-kilometer value, rain-animation clip, and gross-volume calculation share that selected geometry. The solid red map perimeter is a separate province-scale display artifact: mainland Albay and Rapu-Rapu are buffered and dissolved independently, only their exterior rings are retained, and Rapu-Rapu's island chain is kept inside one continuous outline. This removes internal rings and barangay seams. Neither geometry is a surveyed hydrologic catchment.
 
 ### Gross rainfall volume
 
-The estimated volume assumes the accumulated rain falls uniformly across the analysis zone:
+The estimated volume assumes the accumulated rain falls uniformly across the selected land boundary:
 
 ```text
-estimated water (liters) = analysis area (m²) × accumulated rain (mm)
+estimated water (liters) = selected land area (m²) × accumulated rain (mm)
 ```
 
 This works because 1 mm of rain over 1 m² equals 1 liter of water. The number is gross rainfall volume only; it does not account for infiltration, drainage capacity, evaporation, soil saturation, surface roughness, buildings, pumps, tides, river discharge, or upstream flow.
@@ -235,7 +260,7 @@ The server rejects incomplete provider payloads and adds a `_provenance` object 
 
 ### Waterways and waterbodies
 
-The browser calls the local `GET /api/hydrology` route with the selected administrative level and PSA code. The server resolves that code only against the bundled, validated Albay boundary dataset, queries the selected boundary's complete bounding box, and retains every returned feature that spatially intersects the province, municipality, or barangay boundary. Hydrology is therefore independent of the rainfall-analysis circle: selecting Albay Province requests all mapped Albay water features, while a municipality or barangay selection requests that whole administrative area. One Overpass query contains flowing waterways, simple waterbody ways, and multipolygon waterbody relations, keeping every successful response category-complete. It tries the documented main, VK Maps, and Private.coffee global instances; if no provider supplies a complete validated response, the route returns an error instead of silently shrinking the selected area or fabricating data.
+The browser calls the local `GET /api/hydrology` route with the selected administrative level and PSA code. The server resolves that code only against the bundled, validated Albay boundary dataset, queries the selected boundary's complete bounding box, and retains every returned feature that spatially intersects the province, municipality, or barangay boundary. Hydrology and rainfall coverage therefore use the same complete administrative area. One Overpass query contains flowing waterways, simple waterbody ways, and multipolygon waterbody relations, keeping every successful response category-complete. It tries the documented main, VK Maps, and Private.coffee global instances; if no provider supplies a complete validated response, the route returns an error instead of silently shrinking the selected area or fabricating data.
 
 The converter joins relation-member segments into closed outer and inner rings, assigns holes to their containing outer polygon, and returns valid GeoJSON `LineString`, `Polygon`, or `MultiPolygon` features. Supported flowing-water tags are river, stream, canal, drain, ditch, and tidal channel. Supported waterbody tags include `natural=water`, riverbanks, reservoirs, and basins. Returned features retain their OpenStreetMap object type, ID, version, last-edit timestamp, and direct source URL. The server rejects unrecognized source attribution, malformed object metadata or geometry, future timestamps, and Overpass snapshots more than six hours behind the live database. The browser independently validates identity, version, edit time, feature/geometry class, counts, selected scope/code/bounds, spatial intersection, allowed upstream host, response age, and the server's source-validation result before Mapbox receives the data.
 
@@ -285,8 +310,8 @@ flood-map/
 4. The server validates the coordinates and requests Open-Meteo data.
 5. Independently, the server retrieves current Albay station observations from PAGASA.
 6. The client calls `/api/hydrology` with the selected administrative scope/code; the server retrieves, normalizes, validates, and boundary-filters OpenStreetMap water features.
-7. Turf builds the analysis polygon and calculates its area.
-8. React derives transparent model totals, circular area, and gross rainfall volume, while keeping PAGASA measurements visibly separate.
+7. Turf dissolves the selected administrative polygons and calculates their land area.
+8. React applies the model totals to that boundary for the rain zone and gross rainfall volume, while keeping PAGASA measurements visibly separate.
 
 ## API behavior
 
@@ -314,6 +339,7 @@ Successful responses include cache headers, `X-Weather-Source: Open-Meteo Foreca
 - Large screens use a multi-column dashboard with a collapsible readings rail.
 - Tablet and portrait mobile layouts stack the interface into one column.
 - Short landscape mobile screens use a compact two-column arrangement.
+- Compact screens can collapse Analysis Controls to give the released height or width back to the map.
 - The area picker becomes a full-screen dialog on narrow devices.
 - Controls and metric values shrink or reflow to prevent horizontal overflow.
 - Search results expose active-option state and support keyboard-only selection.
@@ -329,7 +355,7 @@ The initial overlay reports progress for area data, weather, 3D map setup, and G
 - The client schedules a weather refresh every five minutes.
 - Data older than twelve minutes is considered stale.
 - Previously loaded weather can remain visible during a temporary network outage.
-- Hydrology requests are debounced only after administrative-area changes; rainfall radius changes do not reload them.
+- Hydrology requests are debounced after administrative-area changes; the same selection also updates rainfall coverage.
 - Hydrology responses use a ten-minute browser/shared HTTP cache. The client also keeps the six most recent exact province/municipality/barangay responses in local storage. A validated response under ten minutes old renders immediately and skips the request; an older response can remain visible for up to six hours while a background refresh runs. Cached data must pass the same identity, geometry, selected-area provenance, boundary-intersection, and snapshot-age validation as a network response, and invalid or expired entries are deleted.
 - A single selected-boundary query, three documented Overpass providers, strict freshness checks, and no silent area reduction prevent an overloaded or stale mirror from being presented as complete current data.
 
@@ -337,11 +363,11 @@ The app does not provide a complete offline map or offline-first installation be
 
 ## Privacy and network requests
 
-- The app does not request browser geolocation.
+- The app requests browser geolocation only after the user selects **Report flood**. It does not retain location unless the user submits the report.
 - There is no account system, user profile, or persistent application database.
 - The browser stores up to six validated hydrology responses locally to speed up repeat visits; these entries contain public OSM geometry and the selected focus coordinates and expire automatically.
 - Selecting an area sends its representative coordinates to the local weather route, which forwards them to Open-Meteo.
-- The browser sends the focus coordinates and bounded hydrology radius only to the local route; the server contacts OpenStreetMap/Overpass.
+- The browser sends only the selected administrative scope and PSA code to the local hydrology route; the server resolves its boundary and contacts OpenStreetMap/Overpass.
 - Mapbox receives normal browser requests required to load its map style and terrain tiles.
 
 Review the policies and operational requirements of these providers before using the application in a production or regulated environment.
@@ -349,7 +375,7 @@ Review the policies and operational requirements of these providers before using
 ## Limitations and safety notice
 
 - This is not a hydrodynamic or drainage-network model.
-- Rain is assumed to be spatially uniform across the circular analysis zone.
+- Rain is assumed to be spatially uniform across the complete selected land boundary.
 - The estimated water volume does not represent ponding depth or runoff volume.
 - Elevation is a coarse model input and is not a parcel-level ground survey.
 - Administrative boundaries are simplified for web display.
@@ -395,11 +421,21 @@ Open `/api/weather` with valid coordinates and inspect the response. A `400` ind
 
 ### Waterways take a long time to appear
 
-Open `/api/hydrology?scope=province&code=05005` and inspect its selected-area provenance, source-validation, counts, and completeness fields. Province queries are larger than municipality or barangay queries and can take several seconds on public Overpass infrastructure. Changing the selected area starts a debounced request for that complete boundary; changing the rainfall radius does not reload or filter hydrology.
+Open `/api/hydrology?scope=province&code=05005` and inspect its selected-area provenance, source-validation, counts, and completeness fields. Province queries are larger than municipality or barangay queries and can take several seconds on public Overpass infrastructure. Changing the selected area starts a debounced request for that complete boundary.
 
 ### Area search has no results
 
 Search by province, city/municipality, or barangay name. If the development console reports a boundary-loading error, confirm `public/albay-barangays.geojson` is present and served successfully.
+
+### Flood reports fail with `auth/admin-restricted-operation`
+
+Firebase is preventing the anonymous account creation used to authorize report writes. In the Firebase project, enable end-user account creation under **Authentication → Settings → User actions**. Then deploy the repository's auth configuration and Firestore rules:
+
+```bash
+npx firebase-tools deploy --only auth,firestore:rules --project your-project-id
+```
+
+If the error is `auth/operation-not-allowed` instead, the Anonymous provider has not been enabled; the same auth deployment enables it from `firebase.json`.
 
 ### Layout issues appear only on mobile
 

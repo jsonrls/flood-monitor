@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     template: "%s | Flood Monitor"
   },
   description:
-    "Explore traceable weather-model rainfall, 3D terrain, verified administrative boundaries, and OpenStreetMap waterways across Albay Province.",
+    "Explore traceable weather-model rainfall, 3D terrain, verified administrative boundaries, and live road traffic across Albay Province.",
   keywords: [
     "flood monitor",
     "Albay flood map",
@@ -42,13 +42,13 @@ export const metadata: Metadata = {
     siteName: "Flood Monitor",
     title: "Albay Flood Monitor | Model Rain & GIS Sources",
     description:
-      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and waterways across Albay Province."
+      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and live road traffic across Albay Province."
   },
   twitter: {
     card: "summary_large_image",
     title: "Albay Flood Monitor | Model Rain & GIS Sources",
     description:
-      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and waterways across Albay Province."
+      "Explore source-attributed weather-model rainfall, 3D terrain, administrative boundaries, and live road traffic across Albay Province."
   },
   robots: {
     index: true,
