@@ -134,6 +134,80 @@ export default function DataSourcesPage() {
             </dl>
           </section>
 
+          <section className="data-source-card" aria-labelledby="source-satellite-rain">
+            <h2 id="source-satellite-rain">{DATA_SOURCES.satelliteRainfall.name}</h2>
+            <p>
+              {DATA_SOURCES.satelliteRainfall.description}. Drawn on the map as the “Satellite rain” overlay for
+              comparison against the modeled rainfall and PAGASA gauge readings.
+            </p>
+            <dl>
+              <div>
+                <dt>Tile endpoint</dt>
+                <dd>
+                  <code>{DATA_SOURCES.satelliteRainfall.endpoint}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Documentation</dt>
+                <dd>
+                  <a href={DATA_SOURCES.satelliteRainfall.documentationUrl} target="_blank" rel="noreferrer">
+                    NASA GIBS API documentation
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="data-source-card" aria-labelledby="source-satellite-flood">
+            <h2 id="source-satellite-flood">{DATA_SOURCES.satelliteFlood.name}</h2>
+            <p>
+              {DATA_SOURCES.satelliteFlood.description}. Drawn on the map as the “Satellite flood extent” overlay to
+              corroborate community flood reports. Optical sensors cannot see through clouds, so heavy overcast can
+              hide flooding.
+            </p>
+            <dl>
+              <div>
+                <dt>Tile endpoint</dt>
+                <dd>
+                  <code>{DATA_SOURCES.satelliteFlood.endpoint}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Documentation</dt>
+                <dd>
+                  <a href={DATA_SOURCES.satelliteFlood.documentationUrl} target="_blank" rel="noreferrer">
+                    NASA MCDWD product documentation
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="data-source-card" aria-labelledby="source-elevation">
+            <h2 id="source-elevation">{DATA_SOURCES.elevation.name}</h2>
+            <p>
+              {DATA_SOURCES.elevation.description}. Drawn on the map as the “Low-lying terrain” overlay; elevation is
+              decoded from terrarium-encoded tiles directly on the GPU. Elevation alone is an approximation of flood
+              susceptibility — drainage and local defenses are not modeled.
+            </p>
+            <dl>
+              <div>
+                <dt>Tile endpoint</dt>
+                <dd>
+                  <code>{DATA_SOURCES.elevation.endpoint}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Documentation</dt>
+                <dd>
+                  <a href={DATA_SOURCES.elevation.documentationUrl} target="_blank" rel="noreferrer">
+                    AWS Open Data registry entry
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
           <section className="data-source-card" aria-labelledby="source-basemap">
             <h2 id="source-basemap">{DATA_SOURCES.basemap.name}</h2>
             <p>Satellite imagery, 3D terrain elevation, and place labels behind every layer.</p>

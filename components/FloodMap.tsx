@@ -137,8 +137,29 @@ type Analysis = {
   windowEndTime: string;
 };
 
+type LaharWatch = {
+  tier: "low" | "moderate" | "high";
+  rateMmPerHour: number;
+  accum3hMm: number;
+  accum24hMm: number;
+  satellite: {
+    sampled: boolean;
+    rainCoveragePercent: number | null;
+  };
+  computedAt: string;
+};
+
+const LAHAR_TIER_LABELS: Record<LaharWatch["tier"], string> = {
+  low: "Low",
+  moderate: "Moderate",
+  high: "High"
+};
+
 type LayerVisibility = {
   rainAnimation: boolean;
+  satelliteRain: boolean;
+  satelliteFlood: boolean;
+  lowLyingTerrain: boolean;
   traffic: boolean;
 };
 
@@ -157,9 +178,32 @@ const WEATHER_FOCUS_REFRESH_MS = 2 * 60 * 1000;
 const WEATHER_STALE_AFTER_MS = 12 * 60 * 1000;
 const LAYER_VISIBILITY_STORAGE_KEY = "albay-flood-monitor:gis-layers:v1";
 const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
-  rainAnimation: true,
-  traffic: true
+  rainAnimation: false,
+  satelliteRain: false,
+  satelliteFlood: false,
+  lowLyingTerrain: false,
+  traffic: false
 };
+
+// NASA GIBS serves GPM IMERG precipitation as public WMTS tiles (CORS-enabled,
+// no API key). "default" time resolves to the newest published half-hour frame;
+// IMERG's near-real-time feed trails observation by roughly 4 hours. Tiles are
+// fully transparent where no rain was measured.
+const IMERG_TILE_URL =
+  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/IMERG_Precipitation_Rate/default/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png";
+const IMERG_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+// NASA MODIS combined flood detection (MCDWD), 3-day composite at 250 m:
+// surface water and flooding observed by the Terra/Aqua satellites. Optical
+// sensors cannot see through clouds, so heavy overcast can hide flooding.
+const MODIS_FLOOD_TILE_URL =
+  "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Combined_Flood_3-Day/default/default/GoogleMapsCompatible_Level9/{z}/{y}/{x}.png";
+
+// NASA SRTM-derived elevation (Terrain Tiles on AWS Open Data, terrarium
+// encoding: meters = R*256 + G + B/256 - 32768). The raster-color ramp shades
+// land under ~30 m above sea level — the province's flood-susceptible ground —
+// and leaves the sea (negative bathymetry) transparent.
+const NASA_DEM_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
 // Published by the Office of the Governor of Albay (official hotline advisory).
 const ALBAY_EMERGENCY_HOTLINES = [
@@ -509,6 +553,7 @@ export default function FloodMap() {
   const [hasLoadedLayerPreferences, setHasLoadedLayerPreferences] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [trafficProvider, setTrafficProvider] = useState<"tomtom" | "mapbox">("mapbox");
+  const [laharWatch, setLaharWatch] = useState<LaharWatch | null>(null);
   const [mapViewMode, setMapViewMode] = useState<"2d" | "3d">("3d");
   const [error, setError] = useState<string | null>(null);
   const [hasFinishedInitialLoad, setHasFinishedInitialLoad] = useState(false);
@@ -977,6 +1022,85 @@ export default function FloodMap() {
         "horizon-blend": 0.12
       });
 
+      map.addSource("nasa-imerg-rain", {
+        type: "raster",
+        tiles: [IMERG_TILE_URL],
+        tileSize: 256,
+        maxzoom: 6,
+        attribution: "Rainfall imagery: NASA GIBS / GPM IMERG"
+      });
+
+      map.addLayer({
+        id: "nasa-imerg-rain-tiles",
+        type: "raster",
+        source: "nasa-imerg-rain",
+        slot: "middle",
+        layout: {
+          visibility: "none"
+        },
+        paint: {
+          "raster-opacity": 0.72
+        }
+      });
+
+      map.addSource("nasa-dem", {
+        type: "raster",
+        tiles: [NASA_DEM_TILE_URL],
+        tileSize: 256,
+        maxzoom: 13,
+        attribution: "Elevation: NASA SRTM via Terrain Tiles (AWS Open Data)"
+      });
+
+      map.addLayer({
+        id: "low-lying-terrain-tiles",
+        type: "raster",
+        source: "nasa-dem",
+        slot: "middle",
+        layout: {
+          visibility: "none"
+        },
+        paint: {
+          // Decode terrarium RGB into meters, then shade by height above sea level.
+          "raster-color-mix": [255 * 256, 255, 255 / 256, -32768],
+          "raster-color-range": [-3, 30],
+          "raster-color": [
+            "interpolate",
+            ["linear"],
+            ["raster-value"],
+            -3, "rgba(0, 0, 0, 0)",
+            -0.5, "rgba(0, 0, 0, 0)",
+            0.5, "rgba(16, 62, 130, 0.5)",
+            5, "rgba(43, 99, 168, 0.4)",
+            10, "rgba(88, 140, 196, 0.28)",
+            20, "rgba(146, 184, 219, 0.14)",
+            30, "rgba(146, 184, 219, 0)"
+          ],
+          "raster-resampling": "linear",
+          "raster-opacity": 1
+        }
+      });
+
+      map.addSource("nasa-modis-flood", {
+        type: "raster",
+        tiles: [MODIS_FLOOD_TILE_URL],
+        tileSize: 256,
+        maxzoom: 9,
+        attribution: "Flood detection: NASA GIBS / MODIS MCDWD"
+      });
+
+      map.addLayer({
+        id: "nasa-modis-flood-tiles",
+        type: "raster",
+        source: "nasa-modis-flood",
+        slot: "middle",
+        layout: {
+          visibility: "none"
+        },
+        paint: {
+          "raster-opacity": 0.8
+        }
+      });
+
       map.addSource("mapbox-traffic", {
         type: "vector",
         url: "mapbox://mapbox.mapbox-traffic-v1"
@@ -990,7 +1114,8 @@ export default function FloodMap() {
         slot: "middle",
         layout: {
           "line-cap": "round",
-          "line-join": "round"
+          "line-join": "round",
+          visibility: "none"
         },
         paint: {
           "line-color": "#ffffff",
@@ -1007,7 +1132,8 @@ export default function FloodMap() {
         slot: "middle",
         layout: {
           "line-cap": "round",
-          "line-join": "round"
+          "line-join": "round",
+          visibility: "none"
         },
         paint: {
           "line-color": TRAFFIC_CONGESTION_COLORS,
@@ -2045,6 +2171,9 @@ export default function FloodMap() {
       });
     };
 
+    setVisibility(["nasa-imerg-rain-tiles"], layerVisibility.satelliteRain);
+    setVisibility(["nasa-modis-flood-tiles"], layerVisibility.satelliteFlood);
+    setVisibility(["low-lying-terrain-tiles"], layerVisibility.lowLyingTerrain);
     setVisibility(["tomtom-traffic-tiles"], layerVisibility.traffic && trafficProvider === "tomtom");
     setVisibility(
       ["traffic-flow-casing", "traffic-flow-line"],
@@ -2077,6 +2206,46 @@ export default function FloodMap() {
       window.clearInterval(pollHandle);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkLaharWatch = async () => {
+      try {
+        const response = await fetch("/api/lahar-watch", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as LaharWatch;
+        if (cancelled || !payload.tier) return;
+        setLaharWatch(payload);
+      } catch {
+        // Keep the previous reading; the next poll will retry.
+      }
+    };
+
+    checkLaharWatch();
+    const pollHandle = window.setInterval(checkLaharWatch, 10 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollHandle);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapLoaded) return;
+
+    const refreshHandle = window.setInterval(() => {
+      const map = mapRef.current;
+      // A changed cache-buster forces fresh tiles so GIBS's "default" time
+      // advances to the newest published frame of each product.
+      const imergSource = map?.getSource("nasa-imerg-rain") as mapboxgl.RasterTileSource | undefined;
+      imergSource?.setTiles([`${IMERG_TILE_URL}?refresh=${Date.now()}`]);
+      const floodSource = map?.getSource("nasa-modis-flood") as mapboxgl.RasterTileSource | undefined;
+      floodSource?.setTiles([`${MODIS_FLOOD_TILE_URL}?refresh=${Date.now()}`]);
+    }, IMERG_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(refreshHandle);
+  }, [mapLoaded]);
 
   useEffect(() => {
     const canvas = rainCanvasRef.current;
@@ -2720,6 +2889,39 @@ export default function FloodMap() {
                     <label>
                       <input
                         type="checkbox"
+                        checked={layerVisibility.satelliteRain}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, satelliteRain: event.target.checked }))
+                        }
+                      />
+                      <span>Satellite rain (NASA)</span>
+                      <strong>IMERG</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.satelliteFlood}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, satelliteFlood: event.target.checked }))
+                        }
+                      />
+                      <span>Satellite flood extent (NASA)</span>
+                      <strong>MODIS</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility.lowLyingTerrain}
+                        onChange={(event) =>
+                          setLayerVisibility((current) => ({ ...current, lowLyingTerrain: event.target.checked }))
+                        }
+                      />
+                      <span>Low-lying terrain (NASA)</span>
+                      <strong>SRTM</strong>
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
                         checked={layerVisibility.traffic}
                         onChange={(event) =>
                           setLayerVisibility((current) => ({ ...current, traffic: event.target.checked }))
@@ -2731,6 +2933,50 @@ export default function FloodMap() {
                   </div>
                 </div>
               </fieldset>
+            </div>
+
+            <div className="district-forward-controlblock district-forward-hotlines-block">
+              <div className="mayon-watch-header">
+                <h2>Mayon lahar watch</h2>
+                <span
+                  className={`mayon-watch-tier is-${laharWatch?.tier ?? "pending"}`}
+                  role="status"
+                  aria-label={
+                    laharWatch
+                      ? `Mayon lahar rain indicator: ${LAHAR_TIER_LABELS[laharWatch.tier]}`
+                      : "Mayon lahar rain indicator loading"
+                  }
+                >
+                  {laharWatch ? LAHAR_TIER_LABELS[laharWatch.tier] : "…"}
+                </span>
+              </div>
+              <ul className="district-forward-hotlines" aria-label="Mayon rainfall readings">
+                <li>
+                  <span>Model rain rate at Mayon</span>
+                  <span className="hotline-value">{laharWatch ? `${formatNumber(laharWatch.rateMmPerHour)} mm/h` : "—"}</span>
+                </li>
+                <li>
+                  <span>3-h rain at Mayon</span>
+                  <span className="hotline-value">{laharWatch ? `${formatNumber(laharWatch.accum3hMm)} mm` : "—"}</span>
+                </li>
+                <li>
+                  <span>Satellite rain over Mayon</span>
+                  <span className="hotline-value">
+                    {laharWatch?.satellite.sampled
+                      ? laharWatch.satellite.rainCoveragePercent && laharWatch.satellite.rainCoveragePercent > 0
+                        ? `IMERG ${laharWatch.satellite.rainCoveragePercent}% of area`
+                        : "None detected"
+                      : "—"}
+                  </span>
+                </li>
+              </ul>
+              <p className="district-forward-hotlines-note">
+                Unofficial rain-based indicator (model + NASA IMERG). Follow{" "}
+                <a href="https://www.phivolcs.dost.gov.ph/" target="_blank" rel="noreferrer">
+                  PHIVOLCS
+                </a>{" "}
+                bulletins.
+              </p>
             </div>
 
             <div className="district-forward-controlblock district-forward-hotlines-block">
@@ -2933,6 +3179,39 @@ export default function FloodMap() {
                 <span className={layerVisibility.rainAnimation ? "" : "is-hidden"} title="Illustrative animation driven by the modeled rain rate">
                   <span className="district-forward-dot rain" aria-hidden="true" />
                   Rain animation
+                </span>
+                <span
+                  className={layerVisibility.satelliteRain ? "" : "is-hidden"}
+                  title="Satellite-measured rain rate from NASA GPM IMERG, light blue to red by intensity; updates half-hourly with about 4 hours lag"
+                >
+                  <span
+                    className="district-forward-dot"
+                    style={{ background: "linear-gradient(90deg, #7fd4f2, #3b7bd6, #f1e04a, #e0402e)" }}
+                    aria-hidden="true"
+                  />
+                  Satellite rain
+                </span>
+                <span
+                  className={layerVisibility.satelliteFlood ? "" : "is-hidden"}
+                  title="Surface water and flooding detected by NASA MODIS over the past 3 days at 250 m; heavy cloud cover can hide flooding"
+                >
+                  <span
+                    className="district-forward-dot"
+                    style={{ background: "linear-gradient(90deg, #2c7fb8, #d7301f)" }}
+                    aria-hidden="true"
+                  />
+                  Flood extent
+                </span>
+                <span
+                  className={layerVisibility.lowLyingTerrain ? "" : "is-hidden"}
+                  title="Land under roughly 30 m above sea level from NASA SRTM elevation; darker blue is lower, more flood-susceptible ground"
+                >
+                  <span
+                    className="district-forward-dot"
+                    style={{ background: "linear-gradient(90deg, #103e82, #92b8db)" }}
+                    aria-hidden="true"
+                  />
+                  Low-lying land
                 </span>
                 <span
                   className={layerVisibility.traffic ? "" : "is-hidden"}

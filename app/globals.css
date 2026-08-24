@@ -1083,6 +1083,59 @@ main {
   padding-bottom: 0;
 }
 
+.mayon-watch-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.mayon-watch-tier {
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  text-transform: uppercase;
+}
+
+.mayon-watch-tier.is-low {
+  background: #0b6b4c;
+  border-color: #0b6b4c;
+  color: #fff;
+}
+
+.mayon-watch-tier.is-moderate {
+  background: #f1b934;
+  border-color: #f1b934;
+  color: var(--ink);
+}
+
+.mayon-watch-tier.is-high {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.district-forward-hotlines .hotline-value {
+  color: var(--ink);
+  flex: 0 0 auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.district-forward-hotlines-note a {
+  color: #0b6b4c;
+  font-weight: 700;
+}
+
 .district-forward-hotlines a {
   border: 1px solid var(--ink);
   color: var(--ink);
