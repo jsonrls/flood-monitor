@@ -10,6 +10,11 @@ import {
 const MIN_ZOOM = 5;
 const MAX_ZOOM = 18;
 const BROWSER_CACHE_SECONDS = 120;
+// Let Vercel's CDN serve repeat tile requests (same z/x/y from any visitor) without
+// invoking this function. Matches the 3-minute in-memory tile cache in lib/tomtomTraffic.
+const CDN_CACHE_SECONDS = 180;
+const CDN_STALE_SECONDS = 120;
+const TILE_CACHE_CONTROL = `public, max-age=${BROWSER_CACHE_SECONDS}, s-maxage=${CDN_CACHE_SECONDS}, stale-while-revalidate=${CDN_STALE_SECONDS}`;
 
 const parseTileCoordinate = (value: string | null) => {
   if (value === null || !/^\d{1,7}$/.test(value)) return null;
@@ -36,7 +41,7 @@ export async function GET(request: Request) {
     return new Response(cached.body, {
       headers: {
         "Content-Type": cached.contentType,
-        "Cache-Control": `public, max-age=${BROWSER_CACHE_SECONDS}`
+        "Cache-Control": TILE_CACHE_CONTROL
       }
     });
   }
@@ -68,7 +73,7 @@ export async function GET(request: Request) {
     return new Response(body, {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": `public, max-age=${BROWSER_CACHE_SECONDS}`
+        "Cache-Control": TILE_CACHE_CONTROL
       }
     });
   } catch {
